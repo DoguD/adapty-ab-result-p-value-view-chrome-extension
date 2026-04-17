@@ -8,6 +8,10 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Adapty A/B Test P-Values — Debug"
+  },
   "content_scripts": [
     {
       "matches": ["https://app.adapty.io/ab-tests/*/metrics/*"],

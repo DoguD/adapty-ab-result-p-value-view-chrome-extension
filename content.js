@@ -7,6 +7,8 @@
 //  - Compute z-tests vs. baseline for the three target metrics.
 //  - Inject "p=0.038" annotations beneath the existing cell value.
 //  - Re-run on every relevant DOM mutation (filter, sort, navigate).
+//  - Keep full intermediate values in `latestDebug` and respond to
+//    APV_GET_DEBUG messages from the popup for step-by-step debugging.
 
 (function () {
   const TABLE_SELECTOR = '[table-id="abTestMetrics"]';
@@ -16,6 +18,7 @@
     'conversionRatePurchasesByUsers',
     'conversionRateTrialsByUsers',
   ];
+  const Z_95 = 1.96; // half-width multiplier we assume for Adapty's CI
 
   // ---- helpers ----------------------------------------------------------
 
@@ -81,12 +84,17 @@
     if (!Number.isFinite(n) || n <= 0) return null;
 
     let mean = null;
+    let lower = null;
+    let upper = null;
+    let halfWidth = null;
     let seRev = null;
     if (range) {
       mean = range.mean;
-      const halfWidth = Math.max(range.upper - range.mean, range.mean - range.lower);
+      lower = range.lower;
+      upper = range.upper;
+      halfWidth = Math.max(range.upper - range.mean, range.mean - range.lower);
       // 95% CI ⇒ SE = halfWidth / 1.96. If halfWidth ≤ 0, SE is unusable.
-      seRev = halfWidth > 0 ? halfWidth / 1.96 : null;
+      seRev = halfWidth > 0 ? halfWidth / Z_95 : null;
     }
 
     return {
@@ -95,9 +103,82 @@
       revenue: Number.isFinite(revenue) ? revenue : 0,
       n,
       mean,
+      lower,
+      upper,
+      halfWidth,
       seRev,
+      crPurchPct: Number.isFinite(crPurchPct) ? crPurchPct : null,
+      crTrialsPct: Number.isFinite(crTrialsPct) ? crTrialsPct : null,
       xPurch: Number.isFinite(crPurchPct) ? Math.round((crPurchPct / 100) * n) : null,
       xTrials: Number.isFinite(crTrialsPct) ? Math.round((crTrialsPct / 100) * n) : null,
+    };
+  }
+
+  // ---- breakdown builders ----------------------------------------------
+  // These return a serialisable object with every intermediate value so
+  // the popup can replay the calculation to the user.
+
+  function revBreakdown(r, b) {
+    const stats = window.APV_Stats;
+    if (r.mean == null || r.seRev == null || b.mean == null || b.seRev == null) {
+      return { status: 'missing' };
+    }
+    const seDiffSq = r.seRev * r.seRev + b.seRev * b.seRev;
+    const seDiff = Math.sqrt(seDiffSq);
+    const diffMeans = r.mean - b.mean;
+    const z = seDiff > 0 ? diffMeans / seDiff : null;
+    const p = z == null ? null : stats.twoSidedP(z);
+    return {
+      status: 'ok',
+      mean1: r.mean,
+      halfWidth1: r.halfWidth,
+      lower1: r.lower,
+      upper1: r.upper,
+      se1: r.seRev,
+      mean2: b.mean,
+      halfWidth2: b.halfWidth,
+      lower2: b.lower,
+      upper2: b.upper,
+      se2: b.seRev,
+      seDiffSq,
+      seDiff,
+      diffMeans,
+      z,
+      p,
+    };
+  }
+
+  function propBreakdown(x1, n1, x2, n2) {
+    const stats = window.APV_Stats;
+    if ([x1, n1, x2, n2].some((v) => !Number.isFinite(v))) {
+      return { status: 'missing' };
+    }
+    if (n1 <= 0 || n2 <= 0) return { status: 'no_n' };
+    if (x1 + x2 <= 0) return { status: 'both_zero' };
+    const p1 = x1 / n1;
+    const p2 = x2 / n2;
+    const pPool = (x1 + x2) / (n1 + n2);
+    const varFactor = pPool * (1 - pPool) * (1 / n1 + 1 / n2);
+    const se = Math.sqrt(varFactor);
+    const diff = p1 - p2;
+    const z = se > 0 ? diff / se : null;
+    const p = z == null ? null : stats.twoSidedP(z);
+    return {
+      status: 'ok',
+      x1,
+      n1,
+      p1,
+      x2,
+      n2,
+      p2,
+      sumX: x1 + x2,
+      sumN: n1 + n2,
+      pPool,
+      varFactor,
+      se,
+      diff,
+      z,
+      p,
     };
   }
 
@@ -126,81 +207,32 @@
       ? 'apv-pvalue apv-na'
       : 'apv-pvalue';
     div.textContent = text;
-    // Mark the cell so CSS can switch to vertical flex layout.
     cell.classList.add('apv-cell');
     cell.appendChild(div);
   }
 
-  function annotateBaseline(rec) {
-    for (const col of TARGET_COLUMNS) {
-      const cell = cellFor(rec.row, col);
-      if (!cell) continue;
-      appendAnnotation(cell, '(baseline)', { baseline: true });
+  function annotateFromBreakdown(cell, b) {
+    if (!b || b.status !== 'ok' || b.p == null) {
+      appendAnnotation(cell, '—', { na: true });
+      return;
     }
-  }
-
-  function annotateRow(rec, base) {
-    const stats = window.APV_Stats;
-
-    // Revenue per 1K: two-sample z-test using CI-derived SE.
-    {
-      const cell = cellFor(rec.row, 'averagePer1000');
-      if (cell) {
-        let label = '—';
-        let opts = { na: true };
-        if (rec.mean != null && rec.seRev != null && base.mean != null && base.seRev != null) {
-          const { p } = stats.zTestMeans(rec.mean, rec.seRev, base.mean, base.seRev);
-          const f = formatP(p);
-          if (f) {
-            label = f;
-            opts = { significant: p < 0.05 };
-          }
-        }
-        appendAnnotation(cell, label, opts);
-      }
+    const label = formatP(b.p);
+    if (!label) {
+      appendAnnotation(cell, '—', { na: true });
+      return;
     }
-
-    // Unique CR purchases.
-    {
-      const cell = cellFor(rec.row, 'conversionRatePurchasesByUsers');
-      if (cell) {
-        let label = '—';
-        let opts = { na: true };
-        if (rec.xPurch != null && base.xPurch != null) {
-          const { p } = stats.zTestProportions(rec.xPurch, rec.n, base.xPurch, base.n);
-          const f = formatP(p);
-          if (f) {
-            label = f;
-            opts = { significant: p < 0.05 };
-          }
-        }
-        appendAnnotation(cell, label, opts);
-      }
-    }
-
-    // Unique CR trials.
-    {
-      const cell = cellFor(rec.row, 'conversionRateTrialsByUsers');
-      if (cell) {
-        let label = '—';
-        let opts = { na: true };
-        if (rec.xTrials != null && base.xTrials != null) {
-          const { p } = stats.zTestProportions(rec.xTrials, rec.n, base.xTrials, base.n);
-          const f = formatP(p);
-          if (f) {
-            label = f;
-            opts = { significant: p < 0.05 };
-          }
-        }
-        appendAnnotation(cell, label, opts);
-      }
-    }
+    appendAnnotation(cell, label, { significant: b.p < 0.05 });
   }
 
   // ---- main pass --------------------------------------------------------
 
+  let latestDebug = null;
+
   function process() {
-    if (!URL_MATCH.test(location.pathname)) return;
+    if (!URL_MATCH.test(location.pathname)) {
+      latestDebug = null;
+      return;
+    }
     const table = document.querySelector(TABLE_SELECTOR);
     if (!table) return;
     const rowGroup = table.querySelector('[role="rowgroup"]');
@@ -208,12 +240,14 @@
     const rowEls = Array.from(rowGroup.querySelectorAll('[role="row"]'));
     if (rowEls.length < 2) {
       clearAnnotations(table);
+      latestDebug = null;
       return;
     }
 
     const records = rowEls.map(readRow).filter(Boolean);
     if (records.length < 2) {
       clearAnnotations(table);
+      latestDebug = null;
       return;
     }
 
@@ -222,10 +256,58 @@
       r.revenue > best.revenue || (r.revenue === best.revenue && r.n > best.n) ? r : best
     );
 
+    // Build debug records first (serialisable copies, no DOM refs).
+    const debugRows = records.map((rec) => {
+      const isBaseline = rec === base;
+      const extracted = {
+        name: rec.name,
+        revenue: rec.revenue,
+        n: rec.n,
+        mean: rec.mean,
+        lower: rec.lower,
+        upper: rec.upper,
+        halfWidth: rec.halfWidth,
+        seRev: rec.seRev,
+        crPurchPct: rec.crPurchPct,
+        crTrialsPct: rec.crTrialsPct,
+        xPurch: rec.xPurch,
+        xTrials: rec.xTrials,
+      };
+      return {
+        ...extracted,
+        isBaseline,
+        comparisons: isBaseline
+          ? null
+          : {
+              rev: revBreakdown(rec, base),
+              purch: propBreakdown(rec.xPurch, rec.n, base.xPurch, base.n),
+              trials: propBreakdown(rec.xTrials, rec.n, base.xTrials, base.n),
+            },
+      };
+    });
+
+    latestDebug = {
+      url: location.href,
+      timestamp: Date.now(),
+      baselineName: base.name,
+      ciMultiplier: Z_95,
+      rows: debugRows,
+    };
+
+    // Now paint annotations using the same breakdowns we just built.
     clearAnnotations(table);
     for (const rec of records) {
-      if (rec === base) annotateBaseline(rec);
-      else annotateRow(rec, base);
+      if (rec === base) {
+        for (const col of TARGET_COLUMNS) {
+          const cell = cellFor(rec.row, col);
+          if (cell) appendAnnotation(cell, '(baseline)', { baseline: true });
+        }
+      } else {
+        const cmp = debugRows.find((d) => d.name === rec.name && !d.isBaseline).comparisons;
+        annotateFromBreakdown(cellFor(rec.row, 'averagePer1000'), cmp.rev);
+        annotateFromBreakdown(cellFor(rec.row, 'conversionRatePurchasesByUsers'), cmp.purch);
+        annotateFromBreakdown(cellFor(rec.row, 'conversionRateTrialsByUsers'), cmp.trials);
+      }
     }
   }
 
@@ -238,7 +320,6 @@
       try {
         process();
       } catch (e) {
-        // Don't let a parsing slip kill the observer.
         console.warn('[apv] process error:', e);
       }
     }, 150);
@@ -250,7 +331,6 @@
   // Also run on initial load and on history navigation in this SPA.
   schedule();
   window.addEventListener('popstate', schedule);
-  // Patch pushState/replaceState so SPA route changes trigger us too.
   for (const fn of ['pushState', 'replaceState']) {
     const orig = history[fn];
     history[fn] = function () {
@@ -258,5 +338,19 @@
       schedule();
       return r;
     };
+  }
+
+  // Popup ↔ content-script bridge.
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.type === 'APV_GET_DEBUG') {
+        // Re-run once synchronously to catch any pending updates.
+        try {
+          process();
+        } catch (_) {}
+        sendResponse({ ok: true, data: latestDebug });
+        return false; // sync response
+      }
+    });
   }
 })();

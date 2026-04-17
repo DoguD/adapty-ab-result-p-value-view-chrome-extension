@@ -11,6 +11,16 @@ Chrome extension that injects p-values into Adapty's A/B test metrics pages for 
 
 Annotations appear automatically once the table mounts and re-render on sort / filter / date-range changes.
 
+## Debug popup
+
+Click the extension's toolbar icon while on a metrics page to open a popup that shows:
+
+- The raw values pulled from each row (mean, CI bounds, half-width, derived SE, CR%, derived `x`).
+- The chosen baseline.
+- For every non-baseline row, the full step-by-step calculation for each of the three metrics — every intermediate term down to `pPool`, `var-factor`, `SE_diff`, `z` and the final `p`.
+
+Use this to compare against your own hand calculation when results disagree with what you see elsewhere.
+
 ## How it works
 
 - **Baseline**: the row with the highest revenue (tie-break: higher unique views). Every other row is compared against it.
@@ -29,10 +39,11 @@ Annotations appear automatically once the table mounts and re-render on sort / f
 
 ## Files
 
-- `manifest.json` — MV3 manifest, content script on Adapty metrics pages.
+- `manifest.json` — MV3 manifest, content script on Adapty metrics pages, action popup.
 - `stats.js` — `normalCDF`, `zTestMeans`, `zTestProportions`.
-- `content.js` — table scraping, baseline pick, p-value injection, MutationObserver.
+- `content.js` — table scraping, baseline pick, p-value injection, MutationObserver, debug bridge.
 - `styles.css` — annotation styling.
+- `popup.html` / `popup.js` / `popup.css` — debug breakdown popup.
 - `icons/` — toolbar/store icons.
 
 ## Quick console sanity check

@@ -1,0 +1,152 @@
+:root {
+  --fg: #1a1a1a;
+  --muted: #696969;
+  --faint: #bbbbc4;
+  --accent: #6720ff;
+  --green: #198754;
+  --red: #c2410c;
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --border: #e5e7eb;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  width: 560px;
+}
+
+header {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+header .sub {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.status {
+  padding: 14px;
+  color: var(--muted);
+}
+.status.error {
+  color: var(--red);
+}
+
+main {
+  padding: 10px 14px 16px;
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+h2 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 14px 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+
+h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 12px 0 4px;
+  color: var(--accent);
+}
+
+table.apv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+table.apv-table th,
+table.apv-table td {
+  padding: 4px 6px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.apv-table th:first-child,
+table.apv-table td:first-child {
+  text-align: left;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+table.apv-table th {
+  color: var(--muted);
+  font-weight: 500;
+  border-bottom: 1px solid #d1d5db;
+}
+table.apv-table tr.baseline td {
+  background: #f3efff;
+  font-weight: 500;
+}
+
+.cmp {
+  margin: 8px 0 14px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.cmp-title {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.section {
+  margin-top: 8px;
+}
+.section:first-child { margin-top: 0; }
+.section .label {
+  font-weight: 600;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.section .sublabel {
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.steps {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #222;
+  padding-left: 4px;
+}
+.steps > div {
+  margin: 2px 0;
+  white-space: pre-wrap;
+}
+.steps b.result-sig {
+  color: var(--green);
+}
+.steps b.result {
+  color: var(--fg);
+}
+.na {
+  color: var(--faint);
+  font-style: italic;
+  font-size: 11px;
+}
+
+footer {
+  padding: 6px 14px;
+  color: var(--muted);
+  font-size: 10.5px;
+  border-top: 1px solid var(--border);
+}
