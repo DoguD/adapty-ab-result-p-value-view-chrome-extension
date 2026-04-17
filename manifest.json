@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Adapty A/B Test P-Values",
+  "version": "0.1.0",
+  "description": "Adds p-values for Revenue per 1K users, Unique CR purchases, and Unique CR trials on Adapty A/B test metrics pages.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://app.adapty.io/ab-tests/*/metrics/*"],
+      "js": ["stats.js", "content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["https://app.adapty.io/*"]
+}

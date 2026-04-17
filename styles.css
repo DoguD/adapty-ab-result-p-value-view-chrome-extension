@@ -1,0 +1,46 @@
+/* Adapty A/B Test p-value annotations. Scoped to the metrics table. */
+
+/* Switch target cells to vertical flex stacking so our annotation can sit
+   directly beneath the existing value. The cells ship as inline-block by
+   default; we override only the ones we've marked. */
+[table-id="abTestMetrics"] .apv-cell {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  justify-content: center !important;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* The chart cell already has an inner flex-column wrapper; keep that
+   happy by letting its width stay 100%. */
+[table-id="abTestMetrics"] [data-column-id="averagePer1000"].apv-cell > div {
+  width: 100%;
+}
+
+[table-id="abTestMetrics"] .apv-pvalue,
+[table-id="abTestMetrics"] .apv-baseline {
+  font-size: 10px;
+  line-height: 1.1;
+  margin-top: 2px;
+  letter-spacing: 0.2px;
+  font-variant-numeric: tabular-nums;
+  color: #696969;
+  text-align: right;
+  user-select: none;
+  pointer-events: none;
+}
+
+[table-id="abTestMetrics"] .apv-pvalue.apv-sig {
+  color: #198754;
+  font-weight: 600;
+}
+
+[table-id="abTestMetrics"] .apv-pvalue.apv-na {
+  color: #bbbbc4;
+}
+
+[table-id="abTestMetrics"] .apv-baseline {
+  color: #6720ff;
+  font-weight: 500;
+}
