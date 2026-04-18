@@ -188,7 +188,7 @@
     };
   }
 
-  // ---- annotation formatting / injection -------------------------------
+  // ---- formatting + panel rendering ------------------------------------
 
   const MINUS = '\u2212'; // typographic minus
 
