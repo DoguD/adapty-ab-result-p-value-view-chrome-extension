@@ -255,18 +255,6 @@
     cell.appendChild(wrap);
   }
 
-  function appendBaseline(cell) {
-    const wrap = document.createElement('div');
-    wrap.setAttribute('data-apv', '');
-    wrap.className = 'apv-anno apv-baseline-block';
-    const line = document.createElement('div');
-    line.className = 'apv-baseline';
-    line.textContent = '(baseline)';
-    wrap.appendChild(line);
-    cell.classList.add('apv-cell');
-    cell.appendChild(wrap);
-  }
-
   function appendNA(cell) {
     const wrap = document.createElement('div');
     wrap.setAttribute('data-apv', '');
@@ -334,9 +322,11 @@
       return;
     }
 
-    // Baseline = highest revenue, tie-break on higher n.
+    // Baseline = lowest revenue, tie-break on lower n. Adapty doesn't
+    // tell us which paywall is variant A vs. B, so we treat the floor
+    // as baseline and report every other variant as a delta vs. it.
     const base = records.reduce((best, r) =>
-      r.revenue > best.revenue || (r.revenue === best.revenue && r.n > best.n) ? r : best
+      r.revenue < best.revenue || (r.revenue === best.revenue && r.n < best.n) ? r : best
     );
 
     // Build debug records first (serialisable copies, no DOM refs).
@@ -378,19 +368,14 @@
     };
 
     // Now paint annotations using the same breakdowns we just built.
+    // Baseline rows are intentionally left untouched (no label).
     clearAnnotations(table);
     for (const rec of records) {
-      if (rec === base) {
-        for (const col of TARGET_COLUMNS) {
-          const cell = cellFor(rec.row, col);
-          if (cell) appendBaseline(cell);
-        }
-      } else {
-        const cmp = debugRows.find((d) => d.name === rec.name && !d.isBaseline).comparisons;
-        annotateRev(cellFor(rec.row, 'averagePer1000'), cmp.rev);
-        annotateProp(cellFor(rec.row, 'conversionRatePurchasesByUsers'), cmp.purch);
-        annotateProp(cellFor(rec.row, 'conversionRateTrialsByUsers'), cmp.trials);
-      }
+      if (rec === base) continue;
+      const cmp = debugRows.find((d) => d.name === rec.name && !d.isBaseline).comparisons;
+      annotateRev(cellFor(rec.row, 'averagePer1000'), cmp.rev);
+      annotateProp(cellFor(rec.row, 'conversionRatePurchasesByUsers'), cmp.purch);
+      annotateProp(cellFor(rec.row, 'conversionRateTrialsByUsers'), cmp.trials);
     }
 
     // Adapty often pins each row's height via inline style="height: 48px"

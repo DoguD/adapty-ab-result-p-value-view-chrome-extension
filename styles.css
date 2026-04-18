@@ -1,50 +1,38 @@
 /* Adapty A/B Test p-value annotations. Scoped to the metrics table. */
 
-/* Make sure nothing in our path clips the absolutely-positioned annotation
-   that sits beneath each cell. */
-[table-id="abTestMetrics"],
 [table-id="abTestMetrics"] [role="rowgroup"] {
   overflow: visible !important;
 }
 
-/* Grow each row enough to hold a 2-line annotation under every cell, and
-   reserve that space via padding-bottom so the cells themselves stay at
-   their original size and the chart isn't squeezed. Adapty pins rows at
-   48px via inline style; content.js also strips style.height so this
-   min-height actually wins. */
+/* Row needs to grow to fit chart + annotation in-cell. content.js also
+   strips Adapty's inline style="height: 48px" so this min-height wins. */
 [table-id="abTestMetrics"] .apv-row {
-  position: relative !important;
-  min-height: 88px !important;
+  min-height: 76px !important;
   height: auto !important;
-  padding-bottom: 32px !important;
-  overflow: visible !important;
   align-items: stretch !important;
+  overflow: visible !important;
   box-sizing: border-box !important;
 }
 
-/* Cells stay in their original Adapty layout. We only need them to be a
-   positioning anchor for the annotation and to not clip its overflow. */
+/* The cell becomes a 2-row grid: the original content gets row 1 at
+   its native 48px height (so the SVG range chart's anchoring is
+   preserved), and our annotation gets row 2 with auto height. */
 [table-id="abTestMetrics"] .apv-cell {
-  position: relative !important;
+  display: grid !important;
+  grid-template-rows: 48px auto !important;
+  align-items: center !important;
   overflow: visible !important;
 }
 
-/* The annotation block lives in the row's bottom padding — absolutely
-   positioned just below the cell's content, so it can't shift the SVG
-   chart sideways. */
-[table-id="abTestMetrics"] .apv-anno {
-  position: absolute;
-  top: 100%;
-  right: 6px;
-  left: 6px;
-  margin-top: 2px;
+[table-id="abTestMetrics"] .apv-cell > .apv-anno {
   text-align: right;
-  pointer-events: none;
-  user-select: none;
   font-size: 10px;
-  line-height: 1.25;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.2px;
+  padding: 0 6px 2px;
+  user-select: none;
+  pointer-events: none;
 }
 
 [table-id="abTestMetrics"] .apv-anno .apv-change {
@@ -65,9 +53,4 @@
 }
 [table-id="abTestMetrics"] .apv-anno .apv-pvalue.apv-na {
   color: #bbbbc4;
-}
-
-[table-id="abTestMetrics"] .apv-anno .apv-baseline {
-  color: #6720ff;
-  font-weight: 500;
 }

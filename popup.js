@@ -80,7 +80,7 @@ function render(debug) {
 
   if (baseline) {
     parts.push(`<h2>Baseline · ${escapeHtml(baseline.name)}</h2>`);
-    parts.push('<div class="na">Highest-revenue row. All p-values below compare against it.</div>');
+    parts.push('<div class="na">Lowest-revenue row. All p-values below compare against it. (Adapty doesn\'t expose A/B labels, so we treat the floor as baseline.)</div>');
   }
 
   for (const r of others) {

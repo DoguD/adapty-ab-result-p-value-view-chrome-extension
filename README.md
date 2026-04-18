@@ -1,6 +1,6 @@
 # Adapty A/B Test P-Values
 
-Chrome extension that injects p-values into Adapty's A/B test metrics pages for three columns: **Revenue per 1K users**, **Unique CR purchases**, and **Unique CR trials**. It writes a small annotation beneath each cell value (e.g. `p=0.038`) and marks the best-performing variant as `(baseline)`.
+Chrome extension that injects p-values into Adapty's A/B test metrics pages for three columns: **Revenue per 1K users**, **Unique CR purchases**, and **Unique CR trials**. Beneath each non-baseline cell it writes the absolute change vs. baseline, the relative percent change, and the p-value (e.g. `+$114.38 (+73%)` / `p=0.038`), color-coded by direction and bolded when significant. The lowest-revenue variant is treated as the baseline and left unlabeled.
 
 ## Install (unpacked)
 
@@ -23,15 +23,16 @@ Use this to compare against your own hand calculation when results disagree with
 
 ## How it works
 
-- **Baseline**: the row with the highest revenue (tie-break: higher unique views). Every other row is compared against it.
+- **Baseline**: the row with the **lowest** revenue (tie-break: lower unique views). Every other row is compared against it. See *Limitations* for why we use the floor instead of the leader.
 - **Revenue per 1K users**: two-sample z-test on means. Standard error derived from the displayed range, assuming it is a 95% confidence interval (`SE = (upper − mean) / 1.96`).
 - **Unique CR purchases / trials**: two-proportion pooled-variance z-test. Numerator = `round(crPct/100 × unique_views)`, denominator = unique views.
 - **p-values** use a two-sided normal approximation.
-- Values with `p < 0.05` are highlighted in green.
+- Annotations are color-coded by direction (green = positive change vs. baseline, red = negative). The p-value below is bold green when `p < 0.05`.
 - Missing or undefined comparisons render as `—`.
 
 ## Limitations
 
+- Adapty's metrics page doesn't indicate which paywall is variant A vs. B, so the extension treats the **lowest-revenue** row as the baseline. Every other variant is shown as a delta (and p-value) vs. that floor — typically the direction you'd expect a winning variant to be reported in.
 - Assumes Adapty's CI is 95% and symmetric. If that ever changes, the revenue p-values drift accordingly.
 - Normal approximation — for tiny n the z-test is optimistic; treat borderline results with caution.
 - No multiple-comparison correction. With many variants the family-wise error rate climbs.
