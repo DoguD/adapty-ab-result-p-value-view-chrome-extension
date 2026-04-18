@@ -1,56 +1,96 @@
-/* Adapty A/B Test p-value annotations. Scoped to the metrics table. */
+/* Adapty A/B Test p-value summary panel. Rendered as a sibling of the
+   metrics table — outside Adapty's CSS-in-JS subtree, so plain
+   stylesheet rules are enough. */
 
-[table-id="abTestMetrics"] [role="rowgroup"] {
-  overflow: visible !important;
-}
-
-/* Row needs to grow to fit chart + annotation in-cell. content.js also
-   strips Adapty's inline style="height: 48px" so this min-height wins. */
-[table-id="abTestMetrics"] .apv-row {
-  min-height: 76px !important;
-  height: auto !important;
-  align-items: stretch !important;
-  overflow: visible !important;
-  box-sizing: border-box !important;
-}
-
-/* The cell becomes a 2-row grid: the original content gets row 1 at
-   its native 48px height (so the SVG range chart's anchoring is
-   preserved), and our annotation gets row 2 with auto height. */
-[table-id="abTestMetrics"] .apv-cell {
-  display: grid !important;
-  grid-template-rows: 48px auto !important;
-  align-items: center !important;
-  overflow: visible !important;
-}
-
-[table-id="abTestMetrics"] .apv-cell > .apv-anno {
-  text-align: right;
-  font-size: 10px;
-  line-height: 1.2;
+#apv-summary-panel {
+  margin: 16px 0 24px;
+  padding: 14px 16px 16px;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  background: #fafafa;
+  font-family: inherit;
+  color: #1f1f23;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.2px;
-  padding: 0 6px 2px;
-  user-select: none;
-  pointer-events: none;
+  box-sizing: border-box;
 }
 
-[table-id="abTestMetrics"] .apv-anno .apv-change {
+#apv-summary-panel .apv-summary-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #1f1f23;
+}
+
+#apv-summary-panel .apv-summary-note {
+  font-size: 11px;
+  font-style: italic;
+  color: #6b6b74;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+#apv-summary-panel .apv-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+#apv-summary-panel .apv-summary-table th,
+#apv-summary-panel .apv-summary-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #ececf0;
+  text-align: right;
+  vertical-align: middle;
+}
+
+#apv-summary-panel .apv-summary-table thead th {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #6b6b74;
+  background: #f2f2f4;
+  border-bottom: 1px solid #d9d9df;
+}
+
+#apv-summary-panel .apv-summary-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+#apv-summary-panel .apv-summary-table th:first-child,
+#apv-summary-panel .apv-summary-table td.apv-variant {
+  text-align: left;
+}
+
+#apv-summary-panel .apv-variant {
+  font-weight: 500;
+  color: #1f1f23;
+  word-break: break-word;
+}
+
+#apv-summary-panel .apv-anno {
+  line-height: 1.3;
+  letter-spacing: 0.1px;
+}
+
+#apv-summary-panel .apv-anno .apv-change {
   font-weight: 500;
   color: #696969;
 }
-[table-id="abTestMetrics"] .apv-anno.apv-up   .apv-change { color: #198754; }
-[table-id="abTestMetrics"] .apv-anno.apv-down .apv-change { color: #c2410c; }
-[table-id="abTestMetrics"] .apv-anno.apv-flat .apv-change { color: #696969; }
+#apv-summary-panel .apv-anno.apv-up   .apv-change { color: #198754; }
+#apv-summary-panel .apv-anno.apv-down .apv-change { color: #c2410c; }
+#apv-summary-panel .apv-anno.apv-flat .apv-change { color: #696969; }
 
-[table-id="abTestMetrics"] .apv-anno .apv-pvalue {
+#apv-summary-panel .apv-anno .apv-pvalue {
   color: #696969;
   font-weight: 400;
+  font-size: 11px;
 }
-[table-id="abTestMetrics"] .apv-anno.apv-sig .apv-pvalue {
+#apv-summary-panel .apv-anno.apv-sig .apv-pvalue {
   color: #198754;
   font-weight: 600;
 }
-[table-id="abTestMetrics"] .apv-anno .apv-pvalue.apv-na {
+#apv-summary-panel .apv-anno .apv-pvalue.apv-na {
   color: #bbbbc4;
 }

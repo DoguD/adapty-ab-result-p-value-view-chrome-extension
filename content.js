@@ -1,11 +1,14 @@
-// Content script: injects p-values into Adapty A/B test metrics tables.
+// Content script: renders a p-value summary panel beneath Adapty A/B
+// test metrics tables.
 //
 // Strategy:
 //  - Wait for the React table (table-id="abTestMetrics") to mount.
 //  - Read each row's relevant cells via stable [data-column-id="..."] selectors.
-//  - Pick the row with highest revenue as the baseline.
+//  - Pick the lowest-revenue row as the baseline.
 //  - Compute z-tests vs. baseline for the three target metrics.
-//  - Inject "p=0.038" annotations beneath the existing cell value.
+//  - Render a single <section id="apv-summary-panel"> sibling of the
+//    table showing change + p-value per variant. No DOM inside Adapty's
+//    table is modified — the panel owns its own subtree.
 //  - Re-run on every relevant DOM mutation (filter, sort, navigate).
 //  - Keep full intermediate values in `latestDebug` and respond to
 //    APV_GET_DEBUG messages from the popup for step-by-step debugging.
@@ -13,11 +16,7 @@
 (function () {
   const TABLE_SELECTOR = '[table-id="abTestMetrics"]';
   const URL_MATCH = /\/ab-tests\/[^/]+\/metrics\//;
-  const TARGET_COLUMNS = [
-    'averagePer1000',
-    'conversionRatePurchasesByUsers',
-    'conversionRateTrialsByUsers',
-  ];
+  const PANEL_ID = 'apv-summary-panel';
   const Z_95 = 1.96; // half-width multiplier we assume for Adapty's CI
 
   // ---- helpers ----------------------------------------------------------
@@ -222,11 +221,6 @@
     return `(${sign}${abs.toFixed(digits)}%)`;
   }
 
-  function clearAnnotations(table) {
-    table.querySelectorAll('[data-apv]').forEach((n) => n.remove());
-    table.querySelectorAll('.apv-cell').forEach((c) => c.classList.remove('apv-cell'));
-  }
-
   function dirClass(v) {
     if (v == null || !Number.isFinite(v)) return 'apv-flat';
     if (v > 0) return 'apv-up';
@@ -234,65 +228,90 @@
     return 'apv-flat';
   }
 
-  // Build the standard 2-line annotation block: change + p-value.
-  // changeText may be null → renders single em-dash.
-  function appendAnnoBlock(cell, { changeText, direction, pText, significant }) {
-    const wrap = document.createElement('div');
-    wrap.setAttribute('data-apv', '');
-    wrap.className = `apv-anno ${dirClass(direction)}${significant ? ' apv-sig' : ''}`;
-
-    const changeDiv = document.createElement('div');
-    changeDiv.className = 'apv-change';
-    changeDiv.textContent = changeText || '—';
-    wrap.appendChild(changeDiv);
-
-    const pDiv = document.createElement('div');
-    pDiv.className = 'apv-pvalue';
-    pDiv.textContent = pText || '—';
-    wrap.appendChild(pDiv);
-
-    cell.classList.add('apv-cell');
-    cell.appendChild(wrap);
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[c]);
   }
 
-  function appendNA(cell) {
-    const wrap = document.createElement('div');
-    wrap.setAttribute('data-apv', '');
-    wrap.className = 'apv-anno apv-flat';
-    const line = document.createElement('div');
-    line.className = 'apv-pvalue apv-na';
-    line.textContent = '—';
-    wrap.appendChild(line);
-    cell.classList.add('apv-cell');
-    cell.appendChild(wrap);
-  }
-
-  function annotateRev(cell, b) {
-    if (!cell) return;
-    if (!b || b.status !== 'ok' || b.p == null) return appendNA(cell);
-    const changeAbs = formatSignedDollar(b.diffMeans);
+  // Render one metric's change/p-value block. `kind` selects formatter
+  // flavor; `b` is the breakdown object from revBreakdown/propBreakdown.
+  function renderMetricCell(kind, b) {
+    if (!b || b.status !== 'ok' || b.p == null) {
+      return '<div class="apv-anno apv-flat"><div class="apv-pvalue apv-na">—</div></div>';
+    }
+    const changeAbs = kind === 'rev'
+      ? formatSignedDollar(b.diffMeans)
+      : formatSignedPP(b.diffPP);
+    const direction = kind === 'rev' ? b.diffMeans : b.diffPP;
     const changePct = formatSignedPct(b.pctChange);
     const changeText = [changeAbs, changePct].filter(Boolean).join(' ');
-    appendAnnoBlock(cell, {
-      changeText,
-      direction: b.diffMeans,
-      pText: formatPLabel(b.p),
-      significant: b.p < 0.05,
-    });
+    const pText = formatPLabel(b.p);
+    const significant = b.p < 0.05;
+    const cls = `apv-anno ${dirClass(direction)}${significant ? ' apv-sig' : ''}`;
+    return (
+      `<div class="${cls}">` +
+        `<div class="apv-change">${escapeHtml(changeText || '—')}</div>` +
+        `<div class="apv-pvalue">${escapeHtml(pText || '—')}</div>` +
+      '</div>'
+    );
   }
 
-  function annotateProp(cell, b) {
-    if (!cell) return;
-    if (!b || b.status !== 'ok' || b.p == null) return appendNA(cell);
-    const changeAbs = formatSignedPP(b.diffPP);
-    const changePct = formatSignedPct(b.pctChange);
-    const changeText = [changeAbs, changePct].filter(Boolean).join(' ');
-    appendAnnoBlock(cell, {
-      changeText,
-      direction: b.diffPP,
-      pText: formatPLabel(b.p),
-      significant: b.p < 0.05,
-    });
+  function renderPanel(table, debugRows, baselineName) {
+    const nonBaseline = debugRows.filter((r) => !r.isBaseline);
+    const head =
+      '<thead><tr>' +
+        '<th>Variant</th>' +
+        '<th>Revenue per 1K users</th>' +
+        '<th>Unique CR purchases</th>' +
+        '<th>Unique CR trials</th>' +
+      '</tr></thead>';
+    const body =
+      '<tbody>' +
+        nonBaseline
+          .map((r) => {
+            const c = r.comparisons || {};
+            return (
+              '<tr>' +
+                `<td class="apv-variant">${escapeHtml(r.name)}</td>` +
+                `<td>${renderMetricCell('rev', c.rev)}</td>` +
+                `<td>${renderMetricCell('prop', c.purch)}</td>` +
+                `<td>${renderMetricCell('prop', c.trials)}</td>` +
+              '</tr>'
+            );
+          })
+          .join('') +
+      '</tbody>';
+    const html =
+      `<div class="apv-summary-title">P-value summary · baseline: ${escapeHtml(baselineName)}</div>` +
+      '<div class="apv-summary-note">Baseline = lowest-revenue variant. Adapty doesn\u2019t expose A/B labels in the DOM, so the floor is treated as baseline and every other variant is shown as a delta vs. it.</div>' +
+      `<table class="apv-summary-table">${head}${body}</table>`;
+
+    let panel = document.getElementById(PANEL_ID);
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = PANEL_ID;
+    }
+    // Ensure the panel sits as the immediate next sibling of the table,
+    // even if React re-parented things between passes.
+    if (panel.parentElement !== table.parentElement || panel.previousElementSibling !== table) {
+      table.parentElement.insertBefore(panel, table.nextSibling);
+    }
+    // Skip innerHTML assignment when the content is unchanged — otherwise
+    // the MutationObserver sees our own write, re-fires schedule(), and
+    // we loop at ~6 Hz forever.
+    if (panel.innerHTML !== html) {
+      panel.innerHTML = html;
+    }
+  }
+
+  function removePanel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) panel.remove();
   }
 
   // ---- main pass --------------------------------------------------------
@@ -302,6 +321,7 @@
   function process() {
     if (!URL_MATCH.test(location.pathname)) {
       latestDebug = null;
+      removePanel();
       return;
     }
     const table = document.querySelector(TABLE_SELECTOR);
@@ -310,15 +330,15 @@
     if (!rowGroup) return;
     const rowEls = Array.from(rowGroup.querySelectorAll('[role="row"]'));
     if (rowEls.length < 2) {
-      clearAnnotations(table);
       latestDebug = null;
+      removePanel();
       return;
     }
 
     const records = rowEls.map(readRow).filter(Boolean);
     if (records.length < 2) {
-      clearAnnotations(table);
       latestDebug = null;
+      removePanel();
       return;
     }
 
@@ -367,25 +387,7 @@
       rows: debugRows,
     };
 
-    // Now paint annotations using the same breakdowns we just built.
-    // Baseline rows are intentionally left untouched (no label).
-    clearAnnotations(table);
-    for (const rec of records) {
-      if (rec === base) continue;
-      const cmp = debugRows.find((d) => d.name === rec.name && !d.isBaseline).comparisons;
-      annotateRev(cellFor(rec.row, 'averagePer1000'), cmp.rev);
-      annotateProp(cellFor(rec.row, 'conversionRatePurchasesByUsers'), cmp.purch);
-      annotateProp(cellFor(rec.row, 'conversionRateTrialsByUsers'), cmp.trials);
-    }
-
-    // Adapty often pins each row's height via inline style="height: 48px"
-    // — strip that so our 2-line annotation can fit. We also tag the
-    // row so styles.css can target it.
-    for (const el of rowEls) {
-      el.classList.add('apv-row');
-      if (el.style && el.style.height) el.style.height = '';
-      if (el.style && el.style.minHeight) el.style.minHeight = '';
-    }
+    renderPanel(table, debugRows, base.name);
   }
 
   // Debounced runner; MutationObserver is noisy on a React app.

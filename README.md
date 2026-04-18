@@ -1,6 +1,6 @@
 # Adapty A/B Test P-Values
 
-Chrome extension that injects p-values into Adapty's A/B test metrics pages for three columns: **Revenue per 1K users**, **Unique CR purchases**, and **Unique CR trials**. Beneath each non-baseline cell it writes the absolute change vs. baseline, the relative percent change, and the p-value (e.g. `+$114.38 (+73%)` / `p=0.038`), color-coded by direction and bolded when significant. The lowest-revenue variant is treated as the baseline and left unlabeled.
+Chrome extension that adds a p-value summary panel beneath Adapty's A/B test metrics table for three metrics: **Revenue per 1K users**, **Unique CR purchases**, and **Unique CR trials**. The panel lists every non-baseline variant with the absolute change vs. baseline, the relative percent change, and the p-value (e.g. `+$114.38 (+73%)` / `p=0.038`), color-coded by direction and bolded when significant. The lowest-revenue variant is treated as the baseline and omitted from the panel. Adapty's own table is not modified.
 
 ## Install (unpacked)
 
@@ -9,7 +9,7 @@ Chrome extension that injects p-values into Adapty's A/B test metrics pages for 
 3. Click **Load unpacked** and select this folder.
 4. Open an A/B test metrics page: `https://app.adapty.io/ab-tests/<id>/metrics/regular`.
 
-Annotations appear automatically once the table mounts and re-render on sort / filter / date-range changes.
+The panel appears automatically below the table once it mounts and re-renders on sort / filter / date-range changes.
 
 ## Debug popup
 
@@ -27,7 +27,7 @@ Use this to compare against your own hand calculation when results disagree with
 - **Revenue per 1K users**: two-sample z-test on means. Standard error derived from the displayed range, assuming it is a 95% confidence interval (`SE = (upper − mean) / 1.96`).
 - **Unique CR purchases / trials**: two-proportion pooled-variance z-test. Numerator = `round(crPct/100 × unique_views)`, denominator = unique views.
 - **p-values** use a two-sided normal approximation.
-- Annotations are color-coded by direction (green = positive change vs. baseline, red = negative). The p-value below is bold green when `p < 0.05`.
+- Panel entries are color-coded by direction (green = positive change vs. baseline, red = negative). The p-value below is bold green when `p < 0.05`.
 - Missing or undefined comparisons render as `—`.
 
 ## Limitations
@@ -42,8 +42,8 @@ Use this to compare against your own hand calculation when results disagree with
 
 - `manifest.json` — MV3 manifest, content script on Adapty metrics pages, action popup.
 - `stats.js` — `normalCDF`, `zTestMeans`, `zTestProportions`.
-- `content.js` — table scraping, baseline pick, p-value injection, MutationObserver, debug bridge.
-- `styles.css` — annotation styling.
+- `content.js` — table scraping, baseline pick, summary-panel rendering, MutationObserver, debug bridge.
+- `styles.css` — panel styling.
 - `popup.html` / `popup.js` / `popup.css` — debug breakdown popup.
 - `icons/` — toolbar/store icons.
 
