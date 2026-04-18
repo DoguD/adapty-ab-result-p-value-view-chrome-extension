@@ -1,46 +1,73 @@
 /* Adapty A/B Test p-value annotations. Scoped to the metrics table. */
 
-/* Switch target cells to vertical flex stacking so our annotation can sit
-   directly beneath the existing value. The cells ship as inline-block by
-   default; we override only the ones we've marked. */
+/* Make sure nothing in our path clips the absolutely-positioned annotation
+   that sits beneath each cell. */
+[table-id="abTestMetrics"],
+[table-id="abTestMetrics"] [role="rowgroup"] {
+  overflow: visible !important;
+}
+
+/* Grow each row enough to hold a 2-line annotation under every cell, and
+   reserve that space via padding-bottom so the cells themselves stay at
+   their original size and the chart isn't squeezed. Adapty pins rows at
+   48px via inline style; content.js also strips style.height so this
+   min-height actually wins. */
+[table-id="abTestMetrics"] .apv-row {
+  position: relative !important;
+  min-height: 88px !important;
+  height: auto !important;
+  padding-bottom: 32px !important;
+  overflow: visible !important;
+  align-items: stretch !important;
+  box-sizing: border-box !important;
+}
+
+/* Cells stay in their original Adapty layout. We only need them to be a
+   positioning anchor for the annotation and to not clip its overflow. */
 [table-id="abTestMetrics"] .apv-cell {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: flex-end !important;
-  justify-content: center !important;
-  padding-top: 4px;
-  padding-bottom: 4px;
+  position: relative !important;
+  overflow: visible !important;
 }
 
-/* The chart cell already has an inner flex-column wrapper; keep that
-   happy by letting its width stay 100%. */
-[table-id="abTestMetrics"] [data-column-id="averagePer1000"].apv-cell > div {
-  width: 100%;
-}
-
-[table-id="abTestMetrics"] .apv-pvalue,
-[table-id="abTestMetrics"] .apv-baseline {
-  font-size: 10px;
-  line-height: 1.1;
+/* The annotation block lives in the row's bottom padding — absolutely
+   positioned just below the cell's content, so it can't shift the SVG
+   chart sideways. */
+[table-id="abTestMetrics"] .apv-anno {
+  position: absolute;
+  top: 100%;
+  right: 6px;
+  left: 6px;
   margin-top: 2px;
-  letter-spacing: 0.2px;
-  font-variant-numeric: tabular-nums;
-  color: #696969;
   text-align: right;
-  user-select: none;
   pointer-events: none;
+  user-select: none;
+  font-size: 10px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
 }
 
-[table-id="abTestMetrics"] .apv-pvalue.apv-sig {
+[table-id="abTestMetrics"] .apv-anno .apv-change {
+  font-weight: 500;
+  color: #696969;
+}
+[table-id="abTestMetrics"] .apv-anno.apv-up   .apv-change { color: #198754; }
+[table-id="abTestMetrics"] .apv-anno.apv-down .apv-change { color: #c2410c; }
+[table-id="abTestMetrics"] .apv-anno.apv-flat .apv-change { color: #696969; }
+
+[table-id="abTestMetrics"] .apv-anno .apv-pvalue {
+  color: #696969;
+  font-weight: 400;
+}
+[table-id="abTestMetrics"] .apv-anno.apv-sig .apv-pvalue {
   color: #198754;
   font-weight: 600;
 }
-
-[table-id="abTestMetrics"] .apv-pvalue.apv-na {
+[table-id="abTestMetrics"] .apv-anno .apv-pvalue.apv-na {
   color: #bbbbc4;
 }
 
-[table-id="abTestMetrics"] .apv-baseline {
+[table-id="abTestMetrics"] .apv-anno .apv-baseline {
   color: #6720ff;
   font-weight: 500;
 }

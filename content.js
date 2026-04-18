@@ -126,6 +126,7 @@
     const seDiffSq = r.seRev * r.seRev + b.seRev * b.seRev;
     const seDiff = Math.sqrt(seDiffSq);
     const diffMeans = r.mean - b.mean;
+    const pctChange = b.mean !== 0 ? (diffMeans / b.mean) * 100 : null;
     const z = seDiff > 0 ? diffMeans / seDiff : null;
     const p = z == null ? null : stats.twoSidedP(z);
     return {
@@ -143,6 +144,7 @@
       seDiffSq,
       seDiff,
       diffMeans,
+      pctChange,
       z,
       p,
     };
@@ -161,6 +163,9 @@
     const varFactor = pPool * (1 - pPool) * (1 / n1 + 1 / n2);
     const se = Math.sqrt(varFactor);
     const diff = p1 - p2;
+    // Absolute change in percentage points and relative pct change.
+    const diffPP = diff * 100;
+    const pctChange = p2 !== 0 ? (diff / p2) * 100 : null;
     const z = se > 0 ? diff / se : null;
     const p = z == null ? null : stats.twoSidedP(z);
     return {
@@ -177,18 +182,44 @@
       varFactor,
       se,
       diff,
+      diffPP,
+      pctChange,
       z,
       p,
     };
   }
 
-  // ---- p-value formatting / injection ----------------------------------
+  // ---- annotation formatting / injection -------------------------------
 
-  function formatP(p) {
+  const MINUS = '\u2212'; // typographic minus
+
+  function formatPLabel(p) {
     if (p == null || !Number.isFinite(p)) return null;
     if (p < 0.001) return 'p<0.001';
     if (p < 0.01) return `p=${p.toFixed(3)}`;
     return `p=${p.toFixed(2)}`;
+  }
+
+  function formatSignedDollar(v) {
+    if (v == null || !Number.isFinite(v)) return null;
+    const sign = v > 0 ? '+' : v < 0 ? MINUS : '';
+    return `${sign}$${Math.abs(v).toFixed(2)}`;
+  }
+
+  function formatSignedPP(v) {
+    if (v == null || !Number.isFinite(v)) return null;
+    const sign = v > 0 ? '+' : v < 0 ? MINUS : '';
+    const abs = Math.abs(v);
+    const digits = abs >= 10 ? 1 : 2;
+    return `${sign}${abs.toFixed(digits)}pp`;
+  }
+
+  function formatSignedPct(v) {
+    if (v == null || !Number.isFinite(v)) return null;
+    const sign = v > 0 ? '+' : v < 0 ? MINUS : '';
+    const abs = Math.abs(v);
+    const digits = abs >= 100 ? 0 : abs >= 10 ? 0 : 1;
+    return `(${sign}${abs.toFixed(digits)}%)`;
   }
 
   function clearAnnotations(table) {
@@ -196,32 +227,84 @@
     table.querySelectorAll('.apv-cell').forEach((c) => c.classList.remove('apv-cell'));
   }
 
-  function appendAnnotation(cell, text, opts) {
-    const div = document.createElement('div');
-    div.setAttribute('data-apv', '');
-    div.className = opts.baseline
-      ? 'apv-baseline'
-      : opts.significant
-      ? 'apv-pvalue apv-sig'
-      : opts.na
-      ? 'apv-pvalue apv-na'
-      : 'apv-pvalue';
-    div.textContent = text;
-    cell.classList.add('apv-cell');
-    cell.appendChild(div);
+  function dirClass(v) {
+    if (v == null || !Number.isFinite(v)) return 'apv-flat';
+    if (v > 0) return 'apv-up';
+    if (v < 0) return 'apv-down';
+    return 'apv-flat';
   }
 
-  function annotateFromBreakdown(cell, b) {
-    if (!b || b.status !== 'ok' || b.p == null) {
-      appendAnnotation(cell, '—', { na: true });
-      return;
-    }
-    const label = formatP(b.p);
-    if (!label) {
-      appendAnnotation(cell, '—', { na: true });
-      return;
-    }
-    appendAnnotation(cell, label, { significant: b.p < 0.05 });
+  // Build the standard 2-line annotation block: change + p-value.
+  // changeText may be null → renders single em-dash.
+  function appendAnnoBlock(cell, { changeText, direction, pText, significant }) {
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-apv', '');
+    wrap.className = `apv-anno ${dirClass(direction)}${significant ? ' apv-sig' : ''}`;
+
+    const changeDiv = document.createElement('div');
+    changeDiv.className = 'apv-change';
+    changeDiv.textContent = changeText || '—';
+    wrap.appendChild(changeDiv);
+
+    const pDiv = document.createElement('div');
+    pDiv.className = 'apv-pvalue';
+    pDiv.textContent = pText || '—';
+    wrap.appendChild(pDiv);
+
+    cell.classList.add('apv-cell');
+    cell.appendChild(wrap);
+  }
+
+  function appendBaseline(cell) {
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-apv', '');
+    wrap.className = 'apv-anno apv-baseline-block';
+    const line = document.createElement('div');
+    line.className = 'apv-baseline';
+    line.textContent = '(baseline)';
+    wrap.appendChild(line);
+    cell.classList.add('apv-cell');
+    cell.appendChild(wrap);
+  }
+
+  function appendNA(cell) {
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-apv', '');
+    wrap.className = 'apv-anno apv-flat';
+    const line = document.createElement('div');
+    line.className = 'apv-pvalue apv-na';
+    line.textContent = '—';
+    wrap.appendChild(line);
+    cell.classList.add('apv-cell');
+    cell.appendChild(wrap);
+  }
+
+  function annotateRev(cell, b) {
+    if (!cell) return;
+    if (!b || b.status !== 'ok' || b.p == null) return appendNA(cell);
+    const changeAbs = formatSignedDollar(b.diffMeans);
+    const changePct = formatSignedPct(b.pctChange);
+    const changeText = [changeAbs, changePct].filter(Boolean).join(' ');
+    appendAnnoBlock(cell, {
+      changeText,
+      direction: b.diffMeans,
+      pText: formatPLabel(b.p),
+      significant: b.p < 0.05,
+    });
+  }
+
+  function annotateProp(cell, b) {
+    if (!cell) return;
+    if (!b || b.status !== 'ok' || b.p == null) return appendNA(cell);
+    const changeAbs = formatSignedPP(b.diffPP);
+    const changePct = formatSignedPct(b.pctChange);
+    const changeText = [changeAbs, changePct].filter(Boolean).join(' ');
+    appendAnnoBlock(cell, {
+      changeText,
+      direction: b.diffPP,
+      pText: formatPLabel(b.p),
+      significant: b.p < 0.05,
+    });
   }
 
   // ---- main pass --------------------------------------------------------
@@ -300,14 +383,23 @@
       if (rec === base) {
         for (const col of TARGET_COLUMNS) {
           const cell = cellFor(rec.row, col);
-          if (cell) appendAnnotation(cell, '(baseline)', { baseline: true });
+          if (cell) appendBaseline(cell);
         }
       } else {
         const cmp = debugRows.find((d) => d.name === rec.name && !d.isBaseline).comparisons;
-        annotateFromBreakdown(cellFor(rec.row, 'averagePer1000'), cmp.rev);
-        annotateFromBreakdown(cellFor(rec.row, 'conversionRatePurchasesByUsers'), cmp.purch);
-        annotateFromBreakdown(cellFor(rec.row, 'conversionRateTrialsByUsers'), cmp.trials);
+        annotateRev(cellFor(rec.row, 'averagePer1000'), cmp.rev);
+        annotateProp(cellFor(rec.row, 'conversionRatePurchasesByUsers'), cmp.purch);
+        annotateProp(cellFor(rec.row, 'conversionRateTrialsByUsers'), cmp.trials);
       }
+    }
+
+    // Adapty often pins each row's height via inline style="height: 48px"
+    // — strip that so our 2-line annotation can fit. We also tag the
+    // row so styles.css can target it.
+    for (const el of rowEls) {
+      el.classList.add('apv-row');
+      if (el.style && el.style.height) el.style.height = '';
+      if (el.style && el.style.minHeight) el.style.minHeight = '';
     }
   }
 
