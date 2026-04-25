@@ -14,7 +14,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://app.adapty.io/ab-tests/*/metrics/*"],
+      "matches": ["https://app.adapty.io/ab-tests/*"],
       "js": ["stats.js", "content.js"],
       "css": ["styles.css"],
       "run_at": "document_idle"
