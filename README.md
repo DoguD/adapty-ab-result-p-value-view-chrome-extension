@@ -2,6 +2,10 @@
 
 Chrome extension that adds a p-value summary panel beneath Adapty's A/B test metrics table for six metrics: **Revenue per 1K users**, **Unique CR purchases**, **Unique CR trials**, **ARPPU**, **Refund rate**, and **Trial cancellation rate**. The panel lists every non-baseline variant with the absolute change vs. baseline, the relative percent change, and the p-value (e.g. `+$114.38 (+73%)` / `p=0.038`), color-coded by direction and bolded when significant. The lowest-revenue variant is treated as the baseline and omitted from the panel. Adapty's own table is not modified.
 
+## Example
+
+![P-value summary panel rendered beneath the Adapty metrics table](docs/example-panel.png)
+
 ## Install (unpacked)
 
 1. Open Chrome → `chrome://extensions`.
