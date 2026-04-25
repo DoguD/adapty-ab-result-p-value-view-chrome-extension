@@ -107,10 +107,23 @@ function renderExtractedTable(rows, ciMult) {
     'x_purch',
     'CR trial %',
     'x_trial',
+    'ARPPU',
+    'Purchases',
+    'Refunds',
+    'Refund %',
+    'Trials',
+    'Trials cancelled',
+    'Cancel %',
   ];
   const body = rows
     .map((r) => {
       const cls = r.isBaseline ? ' class="baseline"' : '';
+      const refundPct = r.refunds != null && r.purchases != null && r.purchases > 0
+        ? (r.refunds / r.purchases) * 100
+        : null;
+      const cancelPct = r.trialsCancelled != null && r.trials != null && r.trials > 0
+        ? (r.trialsCancelled / r.trials) * 100
+        : null;
       return `<tr${cls}>
         <td>${escapeHtml(r.name)}${r.isBaseline ? ' (baseline)' : ''}</td>
         <td>$${fmt(r.revenue, 0)}</td>
@@ -124,6 +137,13 @@ function renderExtractedTable(rows, ciMult) {
         <td>${r.xPurch == null ? '—' : r.xPurch}</td>
         <td>${r.crTrialsPct == null ? '—' : fmt(r.crTrialsPct, 4) + '%'}</td>
         <td>${r.xTrials == null ? '—' : r.xTrials}</td>
+        <td>${r.arppu == null ? '—' : '$' + fmt(r.arppu, 4)}</td>
+        <td>${r.purchases == null ? '—' : r.purchases}</td>
+        <td>${r.refunds == null ? '—' : r.refunds}</td>
+        <td>${refundPct == null ? '—' : fmt(refundPct, 4) + '%'}</td>
+        <td>${r.trials == null ? '—' : r.trials}</td>
+        <td>${r.trialsCancelled == null ? '—' : r.trialsCancelled}</td>
+        <td>${cancelPct == null ? '—' : fmt(cancelPct, 4) + '%'}</td>
       </tr>`;
     })
     .join('');
@@ -140,6 +160,9 @@ function renderComparison(row, baselineName) {
     ${renderRev(c.rev)}
     ${renderProp('Unique CR purchases', c.purch)}
     ${renderProp('Unique CR trials', c.trials)}
+    ${renderArppu(c.arppu)}
+    ${renderProp('Refund rate (refunds / purchases)', c.refundRate)}
+    ${renderProp('Trial cancellation rate (cancelled / started)', c.trialCancel)}
   </div>`;
 }
 
@@ -158,6 +181,26 @@ function renderRev(b) {
     `<div>3. SE_diff = √(SE₁² + SE₂²) = √(${fmt(b.se1 * b.se1, 6)} + ${fmt(b.se2 * b.se2, 6)}) = √${fmt(b.seDiffSq, 6)} = ${fmt(b.seDiff, 6)}</div>` +
     `<div>4. z = (m₁ − m₂) / SE_diff = ${fmt(b.diffMeans, 4)} / ${fmt(b.seDiff, 6)} = ${fmt(b.z, 6)}</div>` +
     `<div>5. p = 2·(1 − Φ(|z|)) = <b class="${pClass}">${fmtP(b.p)}</b></div>` +
+    '</div>' + close;
+}
+
+function renderArppu(b) {
+  const head = '<div class="section"><div class="label">ARPPU (Average Revenue Per Paying User)</div>' +
+    '<div class="sublabel">Two-sample z-test on means via the delta method, treating purchase rate as known. SE_arppu ≈ SE_rev × (arppu / mean). Rough approximation — Adapty does not expose a per-payer revenue distribution.</div>';
+  const close = '</div>';
+  if (!b) return head + '<div class="na">No data.</div>' + close;
+  if (b.status !== 'ok') return head + `<div class="na">${naReason(b.status)}</div>` + close;
+  const sig = Number.isFinite(b.p) && b.p < 0.05;
+  const pClass = sig ? 'result-sig' : 'result';
+  return head +
+    '<div class="steps">' +
+    `<div>1. arppu₁ = ${fmt(b.arppu1, 4)},  scale₁ = arppu₁ / mean₁ = ${fmt(b.arppu1, 4)} / ${fmt(b.mean1, 4)} = ${fmt(b.scale1, 6)}</div>` +
+    `<div>2. SE₁ = SE_rev₁ · scale₁ = ${fmt(b.seRev1, 6)} · ${fmt(b.scale1, 6)} = ${fmt(b.se1, 6)}</div>` +
+    `<div>3. arppu₂ = ${fmt(b.arppu2, 4)},  scale₂ = arppu₂ / mean₂ = ${fmt(b.arppu2, 4)} / ${fmt(b.mean2, 4)} = ${fmt(b.scale2, 6)}</div>` +
+    `<div>4. SE₂ = SE_rev₂ · scale₂ = ${fmt(b.seRev2, 6)} · ${fmt(b.scale2, 6)} = ${fmt(b.se2, 6)}</div>` +
+    `<div>5. SE_diff = √(SE₁² + SE₂²) = √${fmt(b.seDiffSq, 8)} = ${fmt(b.seDiff, 6)}</div>` +
+    `<div>6. z = (arppu₁ − arppu₂) / SE_diff = ${fmt(b.diff, 4)} / ${fmt(b.seDiff, 6)} = ${fmt(b.z, 6)}</div>` +
+    `<div>7. p = 2·(1 − Φ(|z|)) = <b class="${pClass}">${fmtP(b.p)}</b></div>` +
     '</div>' + close;
 }
 
