@@ -78,6 +78,11 @@
     const n = parseNum(cellText(row, 'uniqueProfilesViews'));
     const crPurchPct = parseNum(cellText(row, 'conversionRatePurchasesByUsers'));
     const crTrialsPct = parseNum(cellText(row, 'conversionRateTrialsByUsers'));
+    const arppu = parseNum(cellText(row, 'arppu'));
+    const purchases = parseNum(cellText(row, 'purchases'));
+    const refunds = parseNum(cellText(row, 'refunds'));
+    const trials = parseNum(cellText(row, 'trials'));
+    const trialsCancelled = parseNum(cellText(row, 'trialsCancelled'));
     const range = extractRevRange(row);
 
     if (!Number.isFinite(n) || n <= 0) return null;
@@ -110,6 +115,11 @@
       crTrialsPct: Number.isFinite(crTrialsPct) ? crTrialsPct : null,
       xPurch: Number.isFinite(crPurchPct) ? Math.round((crPurchPct / 100) * n) : null,
       xTrials: Number.isFinite(crTrialsPct) ? Math.round((crTrialsPct / 100) * n) : null,
+      arppu: Number.isFinite(arppu) ? arppu : null,
+      purchases: Number.isFinite(purchases) ? purchases : null,
+      refunds: Number.isFinite(refunds) ? refunds : null,
+      trials: Number.isFinite(trials) ? trials : null,
+      trialsCancelled: Number.isFinite(trialsCancelled) ? trialsCancelled : null,
     };
   }
 
@@ -143,6 +153,49 @@
       seDiffSq,
       seDiff,
       diffMeans,
+      pctChange,
+      z,
+      p,
+    };
+  }
+
+  // ARPPU under the delta method, treating purchase rate as known.
+  // Per-row SE is rev/1K's SE scaled by (arppu / mean) — the deterministic
+  // factor that maps revenue/1K into per-payer revenue. The two scaling
+  // factors differ between variants when their purchase rates differ, so
+  // the resulting z is *close to* but not identical to revenue/1K's z.
+  function arppuBreakdown(r, b) {
+    const stats = window.APV_Stats;
+    const inputs = [r.arppu, r.mean, r.seRev, b.arppu, b.mean, b.seRev];
+    if (inputs.some((v) => v == null || !Number.isFinite(v))) {
+      return { status: 'missing' };
+    }
+    if (r.mean === 0 || b.mean === 0) return { status: 'missing' };
+    const scale1 = r.arppu / r.mean;
+    const scale2 = b.arppu / b.mean;
+    const se1 = r.seRev * scale1;
+    const se2 = b.seRev * scale2;
+    const seDiffSq = se1 * se1 + se2 * se2;
+    const seDiff = Math.sqrt(seDiffSq);
+    const diff = r.arppu - b.arppu;
+    const pctChange = b.arppu !== 0 ? (diff / b.arppu) * 100 : null;
+    const z = seDiff > 0 ? diff / seDiff : null;
+    const p = z == null ? null : stats.twoSidedP(z);
+    return {
+      status: 'ok',
+      arppu1: r.arppu,
+      mean1: r.mean,
+      seRev1: r.seRev,
+      scale1,
+      se1,
+      arppu2: b.arppu,
+      mean2: b.mean,
+      seRev2: b.seRev,
+      scale2,
+      se2,
+      seDiffSq,
+      seDiff,
+      diff,
       pctChange,
       z,
       p,
@@ -239,20 +292,36 @@
   }
 
   // Render one metric's change/p-value block. `kind` selects formatter
-  // flavor; `b` is the breakdown object from revBreakdown/propBreakdown.
+  // flavor; `b` is the breakdown object.
+  // Kinds:
+  //   'rev'          → dollar change, higher = better (green up).
+  //   'arppu'        → dollar change, higher = better (green up).
+  //   'prop'         → percentage-point change, higher = better.
+  //   'inverse-prop' → percentage-point change, higher = WORSE (red up).
   function renderMetricCell(kind, b) {
     if (!b || b.status !== 'ok' || b.p == null) {
       return '<div class="apv-anno apv-flat"><div class="apv-pvalue apv-na">—</div></div>';
     }
-    const changeAbs = kind === 'rev'
-      ? formatSignedDollar(b.diffMeans)
-      : formatSignedPP(b.diffPP);
-    const direction = kind === 'rev' ? b.diffMeans : b.diffPP;
+    let changeAbs;
+    let direction;
+    if (kind === 'rev') {
+      changeAbs = formatSignedDollar(b.diffMeans);
+      direction = b.diffMeans;
+    } else if (kind === 'arppu') {
+      changeAbs = formatSignedDollar(b.diff);
+      direction = b.diff;
+    } else {
+      changeAbs = formatSignedPP(b.diffPP);
+      direction = b.diffPP;
+    }
+    // For inverse-prop, "up" is worse — flip the color signal but keep the
+    // text sign as-is so the absolute change still reads correctly.
+    const colorSignal = kind === 'inverse-prop' ? -direction : direction;
     const changePct = formatSignedPct(b.pctChange);
     const changeText = [changeAbs, changePct].filter(Boolean).join(' ');
     const pText = formatPLabel(b.p);
     const significant = b.p < 0.05;
-    const cls = `apv-anno ${dirClass(direction)}${significant ? ' apv-sig' : ''}`;
+    const cls = `apv-anno ${dirClass(colorSignal)}${significant ? ' apv-sig' : ''}`;
     return (
       `<div class="${cls}">` +
         `<div class="apv-change">${escapeHtml(changeText || '—')}</div>` +
@@ -269,6 +338,9 @@
         '<th>Revenue per 1K users</th>' +
         '<th>Unique CR purchases</th>' +
         '<th>Unique CR trials</th>' +
+        '<th>ARPPU</th>' +
+        '<th>Refund rate</th>' +
+        '<th>Trial cancel rate</th>' +
       '</tr></thead>';
     const body =
       '<tbody>' +
@@ -281,6 +353,9 @@
                 `<td>${renderMetricCell('rev', c.rev)}</td>` +
                 `<td>${renderMetricCell('prop', c.purch)}</td>` +
                 `<td>${renderMetricCell('prop', c.trials)}</td>` +
+                `<td>${renderMetricCell('arppu', c.arppu)}</td>` +
+                `<td>${renderMetricCell('inverse-prop', c.refundRate)}</td>` +
+                `<td>${renderMetricCell('inverse-prop', c.trialCancel)}</td>` +
               '</tr>'
             );
           })
@@ -288,7 +363,7 @@
       '</tbody>';
     const html =
       `<div class="apv-summary-title">P-value summary · baseline: ${escapeHtml(baselineName)}</div>` +
-      '<div class="apv-summary-note">Baseline = lowest-revenue variant. Adapty doesn\u2019t expose A/B labels in the DOM, so the floor is treated as baseline and every other variant is shown as a delta vs. it.</div>' +
+      '<div class="apv-summary-note">Baseline = lowest-revenue variant. Adapty doesn\u2019t expose A/B labels in the DOM, so the floor is treated as baseline and every other variant is shown as a delta vs. it. For refund and trial-cancellation rates, lower is better — green = down vs. baseline.</div>' +
       `<table class="apv-summary-table">${head}${body}</table>`;
 
     let panel = document.getElementById(PANEL_ID);
@@ -365,6 +440,11 @@
         crTrialsPct: rec.crTrialsPct,
         xPurch: rec.xPurch,
         xTrials: rec.xTrials,
+        arppu: rec.arppu,
+        purchases: rec.purchases,
+        refunds: rec.refunds,
+        trials: rec.trials,
+        trialsCancelled: rec.trialsCancelled,
       };
       return {
         ...extracted,
@@ -375,6 +455,9 @@
               rev: revBreakdown(rec, base),
               purch: propBreakdown(rec.xPurch, rec.n, base.xPurch, base.n),
               trials: propBreakdown(rec.xTrials, rec.n, base.xTrials, base.n),
+              arppu: arppuBreakdown(rec, base),
+              refundRate: propBreakdown(rec.refunds, rec.purchases, base.refunds, base.purchases),
+              trialCancel: propBreakdown(rec.trialsCancelled, rec.trials, base.trialsCancelled, base.trials),
             },
       };
     });
