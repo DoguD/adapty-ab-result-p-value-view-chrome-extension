@@ -568,7 +568,7 @@
     return {
       tr,
       name,
-      revenue: Number.isFinite(revenue) ? revenue : 0,
+      revenue: Number.isFinite(revenue) ? revenue : null,
       revPer1K: Number.isFinite(revPer1K) ? revPer1K : null,
       uniqueViews,
       uniquePurchPct: Number.isFinite(uniquePurchPct) ? uniquePurchPct : null,
@@ -739,11 +739,12 @@
     });
   }
 
-  function reorderArticles(container, sortPairs) {
+  function reorderArticles(container, sortPairs, byOriginalIndex) {
     const articles = sortPairs.map((p) => p.article);
     const sorted = sortPairs
       .slice()
       .sort((a, b) => {
+        if (byOriginalIndex) return a.originalIndex - b.originalIndex;
         if (a.score === b.score) return a.originalIndex - b.originalIndex;
         return b.score - a.score; // descending
       })
@@ -780,12 +781,20 @@
         .filter(Boolean);
       if (records.length < 2) continue;
 
-      const base = records.reduce((best, r) =>
-        r.revenue < best.revenue ||
-        (r.revenue === best.revenue && r.uniqueViews < best.uniqueViews)
-          ? r
-          : best
-      );
+      // Baseline = lowest revenue, tie-break on lower uniqueViews. If
+      // the user has hidden the Revenue column we'd silently fall back
+      // to picking by uniqueViews alone (every revenue would be null),
+      // so we fall back to revPer1K — the next-best monotonic proxy
+      // and already a required column.
+      const baseScore = (r) =>
+        Number.isFinite(r.revenue) ? r.revenue : (r.revPer1K != null ? r.revPer1K : Infinity);
+      const base = records.reduce((best, r) => {
+        const sR = baseScore(r);
+        const sB = baseScore(best);
+        if (sR < sB) return r;
+        if (sR === sB && r.uniqueViews < best.uniqueViews) return r;
+        return best;
+      });
 
       const annotated = records.map((rec) => ({
         ...rec,
@@ -833,18 +842,28 @@
     if (tableData.length >= 2 && articleParents.size === 1) {
       const container = articleParents.values().next().value;
       mountedBar = renderSortBar(container);
+      // Capture each article's React-rendered order on first sight so
+      // selecting "Default order" can restore it after our reorders.
+      // (MutationObserver is configured for childList only, not attrs,
+      // so this write doesn't refire it.)
+      const liveOrder = Array.from(container.children).filter((c) => c.tagName === 'ARTICLE');
+      liveOrder.forEach((art, i) => {
+        if (!art.hasAttribute('data-apv-original-index')) {
+          art.setAttribute('data-apv-original-index', String(i));
+        }
+      });
       const sortKey = getSortKey();
-      if (sortKey !== 'none') {
-        const articleOrder = Array.from(container.children).filter((c) => c.tagName === 'ARTICLE');
-        const pairs = tableData
-          .filter((d) => d.article)
-          .map((d) => ({
+      const pairs = tableData
+        .filter((d) => d.article)
+        .map((d) => {
+          const idx = parseInt(d.article.getAttribute('data-apv-original-index'), 10);
+          return {
             article: d.article,
-            score: scoreTest(d.nonBaseline, sortKey),
-            originalIndex: articleOrder.indexOf(d.article),
-          }));
-        reorderArticles(container, pairs);
-      }
+            score: sortKey === 'none' ? null : scoreTest(d.nonBaseline, sortKey),
+            originalIndex: Number.isFinite(idx) ? idx : 0,
+          };
+        });
+      reorderArticles(container, pairs, sortKey === 'none');
     }
     removeSortBars(mountedBar);
   }
