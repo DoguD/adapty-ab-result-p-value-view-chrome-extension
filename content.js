@@ -403,6 +403,7 @@
   function process() {
     if (METRICS_URL_MATCH.test(location.pathname)) {
       removeListingPanels();
+      removeSortBars(null);
       processMetricsPage();
       return;
     }
@@ -415,6 +416,7 @@
     latestDebug = null;
     removePanel();
     removeListingPanels();
+    removeSortBars(null);
   }
 
   function processMetricsPage() {
@@ -640,9 +642,121 @@
     }
   }
 
+  // ---- listing-page sort UI -------------------------------------------
+  // Reorders Adapty's `<article>` test cards by the largest lift across
+  // non-baseline variants for the chosen metric. Persists choice in
+  // localStorage. Re-applied on every MutationObserver pass with an
+  // idempotence guard so we don't fight Adapty's React reconciliation.
+
+  const SORT_STORAGE_KEY = 'apv-listing-sort';
+  const SORT_BAR_CLASS = 'apv-sort-bar';
+  const SORT_OPTIONS = [
+    { key: 'none', label: 'Default order' },
+    { key: 'rev:signed', label: 'Revenue per 1K — by lift' },
+    { key: 'rev:abs', label: 'Revenue per 1K — by |lift|' },
+    { key: 'purch:signed', label: 'Unique CR purchases — by lift' },
+    { key: 'purch:abs', label: 'Unique CR purchases — by |lift|' },
+    { key: 'trials:signed', label: 'Unique CR trials — by lift' },
+    { key: 'trials:abs', label: 'Unique CR trials — by |lift|' },
+  ];
+  const SORT_FIELD = { rev: 'diffMeans', purch: 'diffPP', trials: 'diffPP' };
+
+  function getSortKey() {
+    try {
+      const v = localStorage.getItem(SORT_STORAGE_KEY);
+      return SORT_OPTIONS.some((o) => o.key === v) ? v : 'none';
+    } catch (_) {
+      return 'none';
+    }
+  }
+
+  function setSortKey(v) {
+    try { localStorage.setItem(SORT_STORAGE_KEY, v); } catch (_) {}
+  }
+
+  // Score for a test = max metric value across its non-baseline variants
+  // (signed or absolute). Tests with no usable comparison sink to bottom.
+  function scoreTest(nonBaseline, sortKey) {
+    if (sortKey === 'none') return null;
+    const [metric, mode] = sortKey.split(':');
+    const field = SORT_FIELD[metric];
+    if (!field) return -Infinity;
+    let best = -Infinity;
+    for (const r of nonBaseline) {
+      const c = r.comparisons && r.comparisons[metric];
+      if (!c || c.status !== 'ok') continue;
+      const raw = c[field];
+      if (!Number.isFinite(raw)) continue;
+      const score = mode === 'abs' ? Math.abs(raw) : raw;
+      if (score > best) best = score;
+    }
+    return best;
+  }
+
+  function renderSortBar(container) {
+    let bar = container.querySelector(':scope > .' + SORT_BAR_CLASS);
+    const optionsHtml = SORT_OPTIONS
+      .map((o) => `<option value="${escapeHtml(o.key)}">${escapeHtml(o.label)}</option>`)
+      .join('');
+    const html =
+      '<label class="apv-sort-label">Sort tests by</label>' +
+      `<select class="apv-sort-select">${optionsHtml}</select>`;
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = SORT_BAR_CLASS;
+      bar.innerHTML = html;
+      container.insertBefore(bar, container.firstChild);
+      const select = bar.querySelector('.apv-sort-select');
+      select.addEventListener('change', () => {
+        setSortKey(select.value);
+        schedule();
+      });
+    } else if (bar.parentElement !== container || bar.previousElementSibling !== null) {
+      // React may have re-parented or moved the bar; restore position.
+      container.insertBefore(bar, container.firstChild);
+    }
+    const select = bar.querySelector('.apv-sort-select');
+    if (select && document.activeElement !== select && select.value !== getSortKey()) {
+      select.value = getSortKey();
+    }
+    return bar;
+  }
+
+  function removeSortBars(keep) {
+    document.querySelectorAll('.' + SORT_BAR_CLASS).forEach((b) => {
+      if (b !== keep) b.remove();
+    });
+  }
+
+  function reorderArticles(container, sortPairs) {
+    const articles = sortPairs.map((p) => p.article);
+    const sorted = sortPairs
+      .slice()
+      .sort((a, b) => {
+        if (a.score === b.score) return a.originalIndex - b.originalIndex;
+        return b.score - a.score; // descending
+      })
+      .map((p) => p.article);
+    // Compare the existing article-only order against `sorted`. Only mutate
+    // the DOM when they differ — otherwise our appendChild calls would fire
+    // the MutationObserver in a loop.
+    const currentArticles = Array
+      .from(container.children)
+      .filter((c) => articles.includes(c));
+    let same = currentArticles.length === sorted.length;
+    if (same) {
+      for (let i = 0; i < sorted.length; i++) {
+        if (currentArticles[i] !== sorted[i]) { same = false; break; }
+      }
+    }
+    if (same) return;
+    for (const a of sorted) container.appendChild(a);
+  }
+
   function processListingPage() {
     const tables = findListingTables();
     const kept = new Set();
+    const tableData = []; // { table, nonBaseline, article }
 
     for (const table of tables) {
       const colIndex = buildListingColIndex(table);
@@ -689,9 +803,39 @@
 
       const panel = renderListingPanel(table, base.name, nonBaseline);
       kept.add(panel);
+
+      tableData.push({
+        table,
+        nonBaseline,
+        article: table.closest('article'),
+      });
     }
 
     removeListingPanels(kept);
+
+    // Sort UI + reorder. Only when there are at least 2 cards sharing a
+    // common parent.
+    const articleParents = new Set(
+      tableData.map((d) => d.article && d.article.parentElement).filter(Boolean)
+    );
+    let mountedBar = null;
+    if (tableData.length >= 2 && articleParents.size === 1) {
+      const container = articleParents.values().next().value;
+      mountedBar = renderSortBar(container);
+      const sortKey = getSortKey();
+      if (sortKey !== 'none') {
+        const articleOrder = Array.from(container.children).filter((c) => c.tagName === 'ARTICLE');
+        const pairs = tableData
+          .filter((d) => d.article)
+          .map((d) => ({
+            article: d.article,
+            score: scoreTest(d.nonBaseline, sortKey),
+            originalIndex: articleOrder.indexOf(d.article),
+          }));
+        reorderArticles(container, pairs);
+      }
+    }
+    removeSortBars(mountedBar);
   }
 
   // Debounced runner; MutationObserver is noisy on a React app.

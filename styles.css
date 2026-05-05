@@ -114,3 +114,43 @@
 .apv-listing-panel .apv-anno .apv-pvalue.apv-na {
   color: #bbbbc4;
 }
+
+/* Sort bar mounted at the top of the listing-page test card container.
+   Reorders Adapty's <article> cards by metric lift. */
+.apv-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  background: #fafafa;
+  font-family: inherit;
+  color: #1f1f23;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+
+.apv-sort-bar .apv-sort-label {
+  font-weight: 600;
+  color: #4b4b53;
+  letter-spacing: 0.2px;
+}
+
+.apv-sort-bar .apv-sort-select {
+  font: inherit;
+  color: #1f1f23;
+  background: #ffffff;
+  border: 1px solid #d9d9df;
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  min-width: 260px;
+}
+
+.apv-sort-bar .apv-sort-select:focus {
+  outline: 2px solid #b3b3ff;
+  outline-offset: 1px;
+}
