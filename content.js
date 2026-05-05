@@ -15,8 +15,10 @@
 
 (function () {
   const TABLE_SELECTOR = '[table-id="abTestMetrics"]';
-  const URL_MATCH = /\/ab-tests\/[^/]+\/metrics\//;
+  const METRICS_URL_MATCH = /\/ab-tests\/[^/]+\/metrics\//;
+  const LISTING_URL_MATCH = /\/ab-tests\/(regular|onboarding|crossplacement|autopilot)/;
   const PANEL_ID = 'apv-summary-panel';
+  const LISTING_PANEL_CLASS = 'apv-listing-panel';
   const Z_95 = 1.96; // half-width multiplier we assume for Adapty's CI
 
   // ---- helpers ----------------------------------------------------------
@@ -299,7 +301,7 @@
   //   'prop'         → percentage-point change, higher = better.
   //   'inverse-prop' → percentage-point change, higher = WORSE (red up).
   function renderMetricCell(kind, b) {
-    if (!b || b.status !== 'ok' || b.p == null) {
+    if (!b || b.status !== 'ok') {
       return '<div class="apv-anno apv-flat"><div class="apv-pvalue apv-na">—</div></div>';
     }
     let changeAbs;
@@ -314,18 +316,23 @@
       changeAbs = formatSignedPP(b.diffPP);
       direction = b.diffPP;
     }
+    // If we have neither a finite change nor a p-value, treat as missing.
+    if (!Number.isFinite(direction) && b.p == null) {
+      return '<div class="apv-anno apv-flat"><div class="apv-pvalue apv-na">—</div></div>';
+    }
     // For inverse-prop, "up" is worse — flip the color signal but keep the
     // text sign as-is so the absolute change still reads correctly.
     const colorSignal = kind === 'inverse-prop' ? -direction : direction;
     const changePct = formatSignedPct(b.pctChange);
     const changeText = [changeAbs, changePct].filter(Boolean).join(' ');
     const pText = formatPLabel(b.p);
-    const significant = b.p < 0.05;
+    const significant = b.p != null && b.p < 0.05;
     const cls = `apv-anno ${dirClass(colorSignal)}${significant ? ' apv-sig' : ''}`;
+    const pCellCls = pText == null ? 'apv-pvalue apv-na' : 'apv-pvalue';
     return (
       `<div class="${cls}">` +
         `<div class="apv-change">${escapeHtml(changeText || '—')}</div>` +
-        `<div class="apv-pvalue">${escapeHtml(pText || '—')}</div>` +
+        `<div class="${pCellCls}">${escapeHtml(pText || '—')}</div>` +
       '</div>'
     );
   }
@@ -394,11 +401,23 @@
   let latestDebug = null;
 
   function process() {
-    if (!URL_MATCH.test(location.pathname)) {
-      latestDebug = null;
-      removePanel();
+    if (METRICS_URL_MATCH.test(location.pathname)) {
+      removeListingPanels();
+      processMetricsPage();
       return;
     }
+    if (LISTING_URL_MATCH.test(location.pathname)) {
+      latestDebug = null;
+      removePanel();
+      processListingPage();
+      return;
+    }
+    latestDebug = null;
+    removePanel();
+    removeListingPanels();
+  }
+
+  function processMetricsPage() {
     const table = document.querySelector(TABLE_SELECTOR);
     if (!table) return;
     const rowGroup = table.querySelector('[role="rowgroup"]');
@@ -471,6 +490,208 @@
     };
 
     renderPanel(table, debugRows, base.name);
+  }
+
+  // ---- listing page ----------------------------------------------------
+  // Adapty's `/ab-tests/{regular,onboarding,...}` pages stack one table
+  // per AB test. Tables here use hashed CSS-module classes (no
+  // data-column-id, no [role="row"]), so we identify columns by header
+  // text inside `th .dotted-line` and variant rows by the
+  // `_abTestLetter_*` span (the "A"/"B" badge). The "Total" row has no
+  // such badge — it's filtered out.
+  //
+  // Revenue/1K is rendered as plain text on this page (no SVG, no CI),
+  // so its SE is not derivable. We still surface its absolute and
+  // relative change but skip the p-value.
+
+  const LISTING_REQUIRED_HEADERS = [
+    'Revenue per 1K users',
+    'Unique views',
+    'Unique CR purchases',
+    'Unique CR trials',
+  ];
+
+  function findListingTables() {
+    const out = [];
+    for (const table of document.querySelectorAll('table')) {
+      const headers = table.querySelectorAll('thead th .dotted-line');
+      let hasRevPer1K = false;
+      for (const h of headers) {
+        if ((h.textContent || '').trim() === 'Revenue per 1K users') {
+          hasRevPer1K = true;
+          break;
+        }
+      }
+      if (hasRevPer1K) out.push(table);
+    }
+    return out;
+  }
+
+  function buildListingColIndex(table) {
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    const map = {};
+    ths.forEach((th, i) => {
+      const dotted = th.querySelector('.dotted-line');
+      const text = dotted ? (dotted.textContent || '').trim() : '';
+      if (text) map[text] = i;
+    });
+    return map;
+  }
+
+  function readListingRow(tr, colIndex) {
+    const letterEl = tr.querySelector('[class*="_abTestLetter_"]');
+    if (!letterEl) return null; // Total row — skip.
+    const letter = (letterEl.textContent || '').trim();
+    const nameEl = tr.querySelector('[class*="_containerBody_"]');
+    const paywallName = nameEl ? (nameEl.textContent || '').trim() : '';
+    const name = paywallName ? `${letter} · ${paywallName}` : letter;
+
+    const tds = Array.from(tr.children).filter((c) => c.tagName === 'TD');
+    const cellTextAt = (idx) => {
+      if (idx == null) return '';
+      const td = tds[idx];
+      if (!td) return '';
+      const span = td.querySelector('span') || td;
+      return (span.textContent || '').trim();
+    };
+
+    const revenue = parseNum(cellTextAt(colIndex['Revenue']));
+    const revPer1K = parseNum(cellTextAt(colIndex['Revenue per 1K users']));
+    const uniqueViews = parseNum(cellTextAt(colIndex['Unique views']));
+    const uniquePurchPct = parseNum(cellTextAt(colIndex['Unique CR purchases']));
+    const uniqueTrialsPct = parseNum(cellTextAt(colIndex['Unique CR trials']));
+
+    if (!Number.isFinite(uniqueViews) || uniqueViews <= 0) return null;
+
+    return {
+      tr,
+      name,
+      revenue: Number.isFinite(revenue) ? revenue : 0,
+      revPer1K: Number.isFinite(revPer1K) ? revPer1K : null,
+      uniqueViews,
+      uniquePurchPct: Number.isFinite(uniquePurchPct) ? uniquePurchPct : null,
+      uniqueTrialsPct: Number.isFinite(uniqueTrialsPct) ? uniqueTrialsPct : null,
+      xPurch: Number.isFinite(uniquePurchPct)
+        ? Math.round((uniquePurchPct / 100) * uniqueViews)
+        : null,
+      xTrials: Number.isFinite(uniqueTrialsPct)
+        ? Math.round((uniqueTrialsPct / 100) * uniqueViews)
+        : null,
+    };
+  }
+
+  function listingRevBreakdown(rec, base) {
+    if (rec.revPer1K == null || base.revPer1K == null) {
+      return { status: 'missing' };
+    }
+    const diffMeans = rec.revPer1K - base.revPer1K;
+    const pctChange = base.revPer1K !== 0 ? (diffMeans / base.revPer1K) * 100 : null;
+    return { status: 'ok', diffMeans, pctChange, p: null };
+  }
+
+  function renderListingPanel(table, baselineName, nonBaseline) {
+    const head =
+      '<thead><tr>' +
+        '<th>Variant</th>' +
+        '<th>Revenue per 1K users</th>' +
+        '<th>Unique CR purchases</th>' +
+        '<th>Unique CR trials</th>' +
+      '</tr></thead>';
+    const body =
+      '<tbody>' +
+        nonBaseline
+          .map((r) => {
+            const c = r.comparisons || {};
+            return (
+              '<tr>' +
+                `<td class="apv-variant">${escapeHtml(r.name)}</td>` +
+                `<td>${renderMetricCell('rev', c.rev)}</td>` +
+                `<td>${renderMetricCell('prop', c.purch)}</td>` +
+                `<td>${renderMetricCell('prop', c.trials)}</td>` +
+              '</tr>'
+            );
+          })
+          .join('') +
+      '</tbody>';
+    const html =
+      `<div class="apv-summary-title">P-value summary · baseline: ${escapeHtml(baselineName)}</div>` +
+      '<div class="apv-summary-note">Baseline = lowest-revenue variant. Revenue/1K p-value not computable on this page (no confidence interval rendered). Unique CR purchases/trials use a two-proportion pooled-variance z-test with Unique views as n.</div>' +
+      `<table class="apv-summary-table">${head}${body}</table>`;
+
+    let panel = table.nextElementSibling;
+    if (!panel || !panel.classList || !panel.classList.contains(LISTING_PANEL_CLASS)) {
+      panel = document.createElement('section');
+      panel.className = LISTING_PANEL_CLASS;
+      table.parentElement.insertBefore(panel, table.nextSibling);
+    }
+    if (panel.parentElement !== table.parentElement || panel.previousElementSibling !== table) {
+      table.parentElement.insertBefore(panel, table.nextSibling);
+    }
+    if (panel.innerHTML !== html) {
+      panel.innerHTML = html;
+    }
+    return panel;
+  }
+
+  function removeListingPanels(keepSet) {
+    const panels = document.querySelectorAll('.' + LISTING_PANEL_CLASS);
+    for (const p of panels) {
+      if (!keepSet || !keepSet.has(p)) p.remove();
+    }
+  }
+
+  function processListingPage() {
+    const tables = findListingTables();
+    const kept = new Set();
+
+    for (const table of tables) {
+      const colIndex = buildListingColIndex(table);
+      const missing = LISTING_REQUIRED_HEADERS.some((h) => !(h in colIndex));
+      if (missing) continue;
+
+      const rowEls = Array.from(table.querySelectorAll('tbody tr'));
+      const records = rowEls
+        .map((tr) => readListingRow(tr, colIndex))
+        .filter(Boolean);
+      if (records.length < 2) continue;
+
+      const base = records.reduce((best, r) =>
+        r.revenue < best.revenue ||
+        (r.revenue === best.revenue && r.uniqueViews < best.uniqueViews)
+          ? r
+          : best
+      );
+
+      const annotated = records.map((rec) => ({
+        ...rec,
+        isBaseline: rec === base,
+        comparisons:
+          rec === base
+            ? null
+            : {
+                rev: listingRevBreakdown(rec, base),
+                purch: propBreakdown(
+                  rec.xPurch,
+                  rec.uniqueViews,
+                  base.xPurch,
+                  base.uniqueViews
+                ),
+                trials: propBreakdown(
+                  rec.xTrials,
+                  rec.uniqueViews,
+                  base.xTrials,
+                  base.uniqueViews
+                ),
+              },
+      }));
+      const nonBaseline = annotated.filter((r) => !r.isBaseline);
+      if (nonBaseline.length === 0) continue;
+
+      const panel = renderListingPanel(table, base.name, nonBaseline);
+      kept.add(panel);
+    }
+
+    removeListingPanels(kept);
   }
 
   // Debounced runner; MutationObserver is noisy on a React app.
