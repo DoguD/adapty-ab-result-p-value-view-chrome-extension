@@ -654,10 +654,16 @@
     { key: 'none', label: 'Default order' },
     { key: 'rev:signed', label: 'Revenue per 1K — by lift' },
     { key: 'rev:abs', label: 'Revenue per 1K — by |lift|' },
+    { key: 'rev:pct', label: 'Revenue per 1K — by % change' },
+    { key: 'rev:abs-pct', label: 'Revenue per 1K — by |% change|' },
     { key: 'purch:signed', label: 'Unique CR purchases — by lift' },
     { key: 'purch:abs', label: 'Unique CR purchases — by |lift|' },
+    { key: 'purch:pct', label: 'Unique CR purchases — by % change' },
+    { key: 'purch:abs-pct', label: 'Unique CR purchases — by |% change|' },
     { key: 'trials:signed', label: 'Unique CR trials — by lift' },
     { key: 'trials:abs', label: 'Unique CR trials — by |lift|' },
+    { key: 'trials:pct', label: 'Unique CR trials — by % change' },
+    { key: 'trials:abs-pct', label: 'Unique CR trials — by |% change|' },
   ];
   const SORT_FIELD = { rev: 'diffMeans', purch: 'diffPP', trials: 'diffPP' };
 
@@ -674,20 +680,25 @@
     try { localStorage.setItem(SORT_STORAGE_KEY, v); } catch (_) {}
   }
 
-  // Score for a test = max metric value across its non-baseline variants
-  // (signed or absolute). Tests with no usable comparison sink to bottom.
+  // Score for a test = max metric value across its non-baseline variants.
+  // Mode chooses the comparison field (raw lift vs. relative %) and
+  // whether to take the absolute value. Tests with no usable comparison
+  // sink to bottom.
   function scoreTest(nonBaseline, sortKey) {
     if (sortKey === 'none') return null;
     const [metric, mode] = sortKey.split(':');
-    const field = SORT_FIELD[metric];
-    if (!field) return -Infinity;
+    const liftField = SORT_FIELD[metric];
+    if (!liftField) return -Infinity;
+    const isPct = mode === 'pct' || mode === 'abs-pct';
+    const isAbs = mode === 'abs' || mode === 'abs-pct';
+    const field = isPct ? 'pctChange' : liftField;
     let best = -Infinity;
     for (const r of nonBaseline) {
       const c = r.comparisons && r.comparisons[metric];
       if (!c || c.status !== 'ok') continue;
       const raw = c[field];
       if (!Number.isFinite(raw)) continue;
-      const score = mode === 'abs' ? Math.abs(raw) : raw;
+      const score = isAbs ? Math.abs(raw) : raw;
       if (score > best) best = score;
     }
     return best;
