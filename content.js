@@ -15,8 +15,10 @@
 
 (function () {
   const TABLE_SELECTOR = '[table-id="abTestMetrics"]';
-  const URL_MATCH = /\/ab-tests\/[^/]+\/metrics\//;
+  const METRICS_URL_MATCH = /\/ab-tests\/[^/]+\/metrics\//;
+  const LISTING_URL_MATCH = /\/ab-tests\/(regular|onboarding|crossplacement|autopilot)/;
   const PANEL_ID = 'apv-summary-panel';
+  const LISTING_PANEL_CLASS = 'apv-listing-panel';
   const Z_95 = 1.96; // half-width multiplier we assume for Adapty's CI
 
   // ---- helpers ----------------------------------------------------------
@@ -299,7 +301,7 @@
   //   'prop'         → percentage-point change, higher = better.
   //   'inverse-prop' → percentage-point change, higher = WORSE (red up).
   function renderMetricCell(kind, b) {
-    if (!b || b.status !== 'ok' || b.p == null) {
+    if (!b || b.status !== 'ok') {
       return '<div class="apv-anno apv-flat"><div class="apv-pvalue apv-na">—</div></div>';
     }
     let changeAbs;
@@ -314,18 +316,23 @@
       changeAbs = formatSignedPP(b.diffPP);
       direction = b.diffPP;
     }
+    // If we have neither a finite change nor a p-value, treat as missing.
+    if (!Number.isFinite(direction) && b.p == null) {
+      return '<div class="apv-anno apv-flat"><div class="apv-pvalue apv-na">—</div></div>';
+    }
     // For inverse-prop, "up" is worse — flip the color signal but keep the
     // text sign as-is so the absolute change still reads correctly.
     const colorSignal = kind === 'inverse-prop' ? -direction : direction;
     const changePct = formatSignedPct(b.pctChange);
     const changeText = [changeAbs, changePct].filter(Boolean).join(' ');
     const pText = formatPLabel(b.p);
-    const significant = b.p < 0.05;
+    const significant = b.p != null && b.p < 0.05;
     const cls = `apv-anno ${dirClass(colorSignal)}${significant ? ' apv-sig' : ''}`;
+    const pCellCls = pText == null ? 'apv-pvalue apv-na' : 'apv-pvalue';
     return (
       `<div class="${cls}">` +
         `<div class="apv-change">${escapeHtml(changeText || '—')}</div>` +
-        `<div class="apv-pvalue">${escapeHtml(pText || '—')}</div>` +
+        `<div class="${pCellCls}">${escapeHtml(pText || '—')}</div>` +
       '</div>'
     );
   }
@@ -394,11 +401,25 @@
   let latestDebug = null;
 
   function process() {
-    if (!URL_MATCH.test(location.pathname)) {
-      latestDebug = null;
-      removePanel();
+    if (METRICS_URL_MATCH.test(location.pathname)) {
+      removeListingPanels();
+      removeSortBars(null);
+      processMetricsPage();
       return;
     }
+    if (LISTING_URL_MATCH.test(location.pathname)) {
+      latestDebug = null;
+      removePanel();
+      processListingPage();
+      return;
+    }
+    latestDebug = null;
+    removePanel();
+    removeListingPanels();
+    removeSortBars(null);
+  }
+
+  function processMetricsPage() {
     const table = document.querySelector(TABLE_SELECTOR);
     if (!table) return;
     const rowGroup = table.querySelector('[role="rowgroup"]');
@@ -471,6 +492,380 @@
     };
 
     renderPanel(table, debugRows, base.name);
+  }
+
+  // ---- listing page ----------------------------------------------------
+  // Adapty's `/ab-tests/{regular,onboarding,...}` pages stack one table
+  // per AB test. Tables here use hashed CSS-module classes (no
+  // data-column-id, no [role="row"]), so we identify columns by header
+  // text inside `th .dotted-line` and variant rows by the
+  // `_abTestLetter_*` span (the "A"/"B" badge). The "Total" row has no
+  // such badge — it's filtered out.
+  //
+  // Revenue/1K is rendered as plain text on this page (no SVG, no CI),
+  // so its SE is not derivable. We still surface its absolute and
+  // relative change but skip the p-value.
+
+  const LISTING_REQUIRED_HEADERS = [
+    'Revenue per 1K users',
+    'Unique views',
+    'Unique CR purchases',
+    'Unique CR trials',
+  ];
+
+  function findListingTables() {
+    const out = [];
+    for (const table of document.querySelectorAll('table')) {
+      const headers = table.querySelectorAll('thead th .dotted-line');
+      let hasRevPer1K = false;
+      for (const h of headers) {
+        if ((h.textContent || '').trim() === 'Revenue per 1K users') {
+          hasRevPer1K = true;
+          break;
+        }
+      }
+      if (hasRevPer1K) out.push(table);
+    }
+    return out;
+  }
+
+  function buildListingColIndex(table) {
+    const ths = Array.from(table.querySelectorAll('thead th'));
+    const map = {};
+    ths.forEach((th, i) => {
+      const dotted = th.querySelector('.dotted-line');
+      const text = dotted ? (dotted.textContent || '').trim() : '';
+      if (text) map[text] = i;
+    });
+    return map;
+  }
+
+  function readListingRow(tr, colIndex) {
+    const letterEl = tr.querySelector('[class*="_abTestLetter_"]');
+    if (!letterEl) return null; // Total row — skip.
+    const letter = (letterEl.textContent || '').trim();
+    const nameEl = tr.querySelector('[class*="_containerBody_"]');
+    const paywallName = nameEl ? (nameEl.textContent || '').trim() : '';
+    const name = paywallName ? `${letter} · ${paywallName}` : letter;
+
+    const tds = Array.from(tr.children).filter((c) => c.tagName === 'TD');
+    const cellTextAt = (idx) => {
+      if (idx == null) return '';
+      const td = tds[idx];
+      if (!td) return '';
+      const span = td.querySelector('span') || td;
+      return (span.textContent || '').trim();
+    };
+
+    const revenue = parseNum(cellTextAt(colIndex['Revenue']));
+    const revPer1K = parseNum(cellTextAt(colIndex['Revenue per 1K users']));
+    const uniqueViews = parseNum(cellTextAt(colIndex['Unique views']));
+    const uniquePurchPct = parseNum(cellTextAt(colIndex['Unique CR purchases']));
+    const uniqueTrialsPct = parseNum(cellTextAt(colIndex['Unique CR trials']));
+
+    if (!Number.isFinite(uniqueViews) || uniqueViews <= 0) return null;
+
+    return {
+      tr,
+      name,
+      revenue: Number.isFinite(revenue) ? revenue : null,
+      revPer1K: Number.isFinite(revPer1K) ? revPer1K : null,
+      uniqueViews,
+      uniquePurchPct: Number.isFinite(uniquePurchPct) ? uniquePurchPct : null,
+      uniqueTrialsPct: Number.isFinite(uniqueTrialsPct) ? uniqueTrialsPct : null,
+      xPurch: Number.isFinite(uniquePurchPct)
+        ? Math.round((uniquePurchPct / 100) * uniqueViews)
+        : null,
+      xTrials: Number.isFinite(uniqueTrialsPct)
+        ? Math.round((uniqueTrialsPct / 100) * uniqueViews)
+        : null,
+    };
+  }
+
+  function listingRevBreakdown(rec, base) {
+    if (rec.revPer1K == null || base.revPer1K == null) {
+      return { status: 'missing' };
+    }
+    const diffMeans = rec.revPer1K - base.revPer1K;
+    const pctChange = base.revPer1K !== 0 ? (diffMeans / base.revPer1K) * 100 : null;
+    return { status: 'ok', diffMeans, pctChange, p: null };
+  }
+
+  function renderListingPanel(table, baselineName, nonBaseline) {
+    const head =
+      '<thead><tr>' +
+        '<th>Variant</th>' +
+        '<th>Revenue per 1K users</th>' +
+        '<th>Unique CR purchases</th>' +
+        '<th>Unique CR trials</th>' +
+      '</tr></thead>';
+    const body =
+      '<tbody>' +
+        nonBaseline
+          .map((r) => {
+            const c = r.comparisons || {};
+            return (
+              '<tr>' +
+                `<td class="apv-variant">${escapeHtml(r.name)}</td>` +
+                `<td>${renderMetricCell('rev', c.rev)}</td>` +
+                `<td>${renderMetricCell('prop', c.purch)}</td>` +
+                `<td>${renderMetricCell('prop', c.trials)}</td>` +
+              '</tr>'
+            );
+          })
+          .join('') +
+      '</tbody>';
+    const html =
+      `<div class="apv-summary-title">P-value summary · baseline: ${escapeHtml(baselineName)}</div>` +
+      '<div class="apv-summary-note">Baseline = lowest-revenue variant. Revenue/1K p-value not computable on this page (no confidence interval rendered). Unique CR purchases/trials use a two-proportion pooled-variance z-test with Unique views as n.</div>' +
+      `<table class="apv-summary-table">${head}${body}</table>`;
+
+    let panel = table.nextElementSibling;
+    if (!panel || !panel.classList || !panel.classList.contains(LISTING_PANEL_CLASS)) {
+      panel = document.createElement('section');
+      panel.className = LISTING_PANEL_CLASS;
+      table.parentElement.insertBefore(panel, table.nextSibling);
+    }
+    if (panel.parentElement !== table.parentElement || panel.previousElementSibling !== table) {
+      table.parentElement.insertBefore(panel, table.nextSibling);
+    }
+    if (panel.innerHTML !== html) {
+      panel.innerHTML = html;
+    }
+    return panel;
+  }
+
+  function removeListingPanels(keepSet) {
+    const panels = document.querySelectorAll('.' + LISTING_PANEL_CLASS);
+    for (const p of panels) {
+      if (!keepSet || !keepSet.has(p)) p.remove();
+    }
+  }
+
+  // ---- listing-page sort UI -------------------------------------------
+  // Reorders Adapty's `<article>` test cards by the largest lift across
+  // non-baseline variants for the chosen metric. Persists choice in
+  // localStorage. Re-applied on every MutationObserver pass with an
+  // idempotence guard so we don't fight Adapty's React reconciliation.
+
+  const SORT_STORAGE_KEY = 'apv-listing-sort';
+  const SORT_BAR_CLASS = 'apv-sort-bar';
+  const SORT_OPTIONS = [
+    { key: 'none', label: 'Default order' },
+    { key: 'rev:signed', label: 'Revenue per 1K — by lift' },
+    { key: 'rev:abs', label: 'Revenue per 1K — by |lift|' },
+    { key: 'rev:pct', label: 'Revenue per 1K — by % change' },
+    { key: 'rev:abs-pct', label: 'Revenue per 1K — by |% change|' },
+    { key: 'purch:signed', label: 'Unique CR purchases — by lift' },
+    { key: 'purch:abs', label: 'Unique CR purchases — by |lift|' },
+    { key: 'purch:pct', label: 'Unique CR purchases — by % change' },
+    { key: 'purch:abs-pct', label: 'Unique CR purchases — by |% change|' },
+    { key: 'trials:signed', label: 'Unique CR trials — by lift' },
+    { key: 'trials:abs', label: 'Unique CR trials — by |lift|' },
+    { key: 'trials:pct', label: 'Unique CR trials — by % change' },
+    { key: 'trials:abs-pct', label: 'Unique CR trials — by |% change|' },
+  ];
+  const SORT_FIELD = { rev: 'diffMeans', purch: 'diffPP', trials: 'diffPP' };
+
+  function getSortKey() {
+    try {
+      const v = localStorage.getItem(SORT_STORAGE_KEY);
+      return SORT_OPTIONS.some((o) => o.key === v) ? v : 'none';
+    } catch (_) {
+      return 'none';
+    }
+  }
+
+  function setSortKey(v) {
+    try { localStorage.setItem(SORT_STORAGE_KEY, v); } catch (_) {}
+  }
+
+  // Score for a test = max metric value across its non-baseline variants.
+  // Mode chooses the comparison field (raw lift vs. relative %) and
+  // whether to take the absolute value. Tests with no usable comparison
+  // sink to bottom.
+  function scoreTest(nonBaseline, sortKey) {
+    if (sortKey === 'none') return null;
+    const [metric, mode] = sortKey.split(':');
+    const liftField = SORT_FIELD[metric];
+    if (!liftField) return -Infinity;
+    const isPct = mode === 'pct' || mode === 'abs-pct';
+    const isAbs = mode === 'abs' || mode === 'abs-pct';
+    const field = isPct ? 'pctChange' : liftField;
+    let best = -Infinity;
+    for (const r of nonBaseline) {
+      const c = r.comparisons && r.comparisons[metric];
+      if (!c || c.status !== 'ok') continue;
+      const raw = c[field];
+      if (!Number.isFinite(raw)) continue;
+      const score = isAbs ? Math.abs(raw) : raw;
+      if (score > best) best = score;
+    }
+    return best;
+  }
+
+  function renderSortBar(container) {
+    let bar = container.querySelector(':scope > .' + SORT_BAR_CLASS);
+    const optionsHtml = SORT_OPTIONS
+      .map((o) => `<option value="${escapeHtml(o.key)}">${escapeHtml(o.label)}</option>`)
+      .join('');
+    const html =
+      '<label class="apv-sort-label">Sort tests by</label>' +
+      `<select class="apv-sort-select">${optionsHtml}</select>`;
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = SORT_BAR_CLASS;
+      bar.innerHTML = html;
+      container.insertBefore(bar, container.firstChild);
+      const select = bar.querySelector('.apv-sort-select');
+      select.addEventListener('change', () => {
+        setSortKey(select.value);
+        schedule();
+      });
+    } else if (bar.parentElement !== container || bar.previousElementSibling !== null) {
+      // React may have re-parented or moved the bar; restore position.
+      container.insertBefore(bar, container.firstChild);
+    }
+    const select = bar.querySelector('.apv-sort-select');
+    if (select && document.activeElement !== select && select.value !== getSortKey()) {
+      select.value = getSortKey();
+    }
+    return bar;
+  }
+
+  function removeSortBars(keep) {
+    document.querySelectorAll('.' + SORT_BAR_CLASS).forEach((b) => {
+      if (b !== keep) b.remove();
+    });
+  }
+
+  function reorderArticles(container, sortPairs, byOriginalIndex) {
+    const articles = sortPairs.map((p) => p.article);
+    const sorted = sortPairs
+      .slice()
+      .sort((a, b) => {
+        if (byOriginalIndex) return a.originalIndex - b.originalIndex;
+        if (a.score === b.score) return a.originalIndex - b.originalIndex;
+        return b.score - a.score; // descending
+      })
+      .map((p) => p.article);
+    // Compare the existing article-only order against `sorted`. Only mutate
+    // the DOM when they differ — otherwise our appendChild calls would fire
+    // the MutationObserver in a loop.
+    const currentArticles = Array
+      .from(container.children)
+      .filter((c) => articles.includes(c));
+    let same = currentArticles.length === sorted.length;
+    if (same) {
+      for (let i = 0; i < sorted.length; i++) {
+        if (currentArticles[i] !== sorted[i]) { same = false; break; }
+      }
+    }
+    if (same) return;
+    for (const a of sorted) container.appendChild(a);
+  }
+
+  function processListingPage() {
+    const tables = findListingTables();
+    const kept = new Set();
+    const tableData = []; // { table, nonBaseline, article }
+
+    for (const table of tables) {
+      const colIndex = buildListingColIndex(table);
+      const missing = LISTING_REQUIRED_HEADERS.some((h) => !(h in colIndex));
+      if (missing) continue;
+
+      const rowEls = Array.from(table.querySelectorAll('tbody tr'));
+      const records = rowEls
+        .map((tr) => readListingRow(tr, colIndex))
+        .filter(Boolean);
+      if (records.length < 2) continue;
+
+      // Baseline = lowest revenue, tie-break on lower uniqueViews. If
+      // the user has hidden the Revenue column we'd silently fall back
+      // to picking by uniqueViews alone (every revenue would be null),
+      // so we fall back to revPer1K — the next-best monotonic proxy
+      // and already a required column.
+      const baseScore = (r) =>
+        Number.isFinite(r.revenue) ? r.revenue : (r.revPer1K != null ? r.revPer1K : Infinity);
+      const base = records.reduce((best, r) => {
+        const sR = baseScore(r);
+        const sB = baseScore(best);
+        if (sR < sB) return r;
+        if (sR === sB && r.uniqueViews < best.uniqueViews) return r;
+        return best;
+      });
+
+      const annotated = records.map((rec) => ({
+        ...rec,
+        isBaseline: rec === base,
+        comparisons:
+          rec === base
+            ? null
+            : {
+                rev: listingRevBreakdown(rec, base),
+                purch: propBreakdown(
+                  rec.xPurch,
+                  rec.uniqueViews,
+                  base.xPurch,
+                  base.uniqueViews
+                ),
+                trials: propBreakdown(
+                  rec.xTrials,
+                  rec.uniqueViews,
+                  base.xTrials,
+                  base.uniqueViews
+                ),
+              },
+      }));
+      const nonBaseline = annotated.filter((r) => !r.isBaseline);
+      if (nonBaseline.length === 0) continue;
+
+      const panel = renderListingPanel(table, base.name, nonBaseline);
+      kept.add(panel);
+
+      tableData.push({
+        table,
+        nonBaseline,
+        article: table.closest('article'),
+      });
+    }
+
+    removeListingPanels(kept);
+
+    // Sort UI + reorder. Only when there are at least 2 cards sharing a
+    // common parent.
+    const articleParents = new Set(
+      tableData.map((d) => d.article && d.article.parentElement).filter(Boolean)
+    );
+    let mountedBar = null;
+    if (tableData.length >= 2 && articleParents.size === 1) {
+      const container = articleParents.values().next().value;
+      mountedBar = renderSortBar(container);
+      // Capture each article's React-rendered order on first sight so
+      // selecting "Default order" can restore it after our reorders.
+      // (MutationObserver is configured for childList only, not attrs,
+      // so this write doesn't refire it.)
+      const liveOrder = Array.from(container.children).filter((c) => c.tagName === 'ARTICLE');
+      liveOrder.forEach((art, i) => {
+        if (!art.hasAttribute('data-apv-original-index')) {
+          art.setAttribute('data-apv-original-index', String(i));
+        }
+      });
+      const sortKey = getSortKey();
+      const pairs = tableData
+        .filter((d) => d.article)
+        .map((d) => {
+          const idx = parseInt(d.article.getAttribute('data-apv-original-index'), 10);
+          return {
+            article: d.article,
+            score: sortKey === 'none' ? null : scoreTest(d.nonBaseline, sortKey),
+            originalIndex: Number.isFinite(idx) ? idx : 0,
+          };
+        });
+      reorderArticles(container, pairs, sortKey === 'none');
+    }
+    removeSortBars(mountedBar);
   }
 
   // Debounced runner; MutationObserver is noisy on a React app.

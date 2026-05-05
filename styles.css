@@ -1,8 +1,10 @@
 /* Adapty A/B Test p-value summary panel. Rendered as a sibling of the
-   metrics table — outside Adapty's CSS-in-JS subtree, so plain
-   stylesheet rules are enough. */
+   metrics table (or as a sibling of each per-test table on the listing
+   page) — outside Adapty's CSS-in-JS subtree, so plain stylesheet
+   rules are enough. */
 
-#apv-summary-panel {
+#apv-summary-panel,
+.apv-listing-panel {
   margin: 16px 0 24px;
   padding: 14px 16px 16px;
   border: 1px solid #e4e4e7;
@@ -14,14 +16,16 @@
   box-sizing: border-box;
 }
 
-#apv-summary-panel .apv-summary-title {
+#apv-summary-panel .apv-summary-title,
+.apv-listing-panel .apv-summary-title {
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 4px;
   color: #1f1f23;
 }
 
-#apv-summary-panel .apv-summary-note {
+#apv-summary-panel .apv-summary-note,
+.apv-listing-panel .apv-summary-note {
   font-size: 11px;
   font-style: italic;
   color: #6b6b74;
@@ -29,7 +33,8 @@
   line-height: 1.4;
 }
 
-#apv-summary-panel .apv-summary-table {
+#apv-summary-panel .apv-summary-table,
+.apv-listing-panel .apv-summary-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -37,14 +42,17 @@
 }
 
 #apv-summary-panel .apv-summary-table th,
-#apv-summary-panel .apv-summary-table td {
+#apv-summary-panel .apv-summary-table td,
+.apv-listing-panel .apv-summary-table th,
+.apv-listing-panel .apv-summary-table td {
   padding: 8px 10px;
   border-bottom: 1px solid #ececf0;
   text-align: right;
   vertical-align: middle;
 }
 
-#apv-summary-panel .apv-summary-table thead th {
+#apv-summary-panel .apv-summary-table thead th,
+.apv-listing-panel .apv-summary-table thead th {
   font-weight: 600;
   font-size: 11px;
   text-transform: uppercase;
@@ -54,43 +62,95 @@
   border-bottom: 1px solid #d9d9df;
 }
 
-#apv-summary-panel .apv-summary-table tbody tr:last-child td {
+#apv-summary-panel .apv-summary-table tbody tr:last-child td,
+.apv-listing-panel .apv-summary-table tbody tr:last-child td {
   border-bottom: none;
 }
 
 #apv-summary-panel .apv-summary-table th:first-child,
-#apv-summary-panel .apv-summary-table td.apv-variant {
+#apv-summary-panel .apv-summary-table td.apv-variant,
+.apv-listing-panel .apv-summary-table th:first-child,
+.apv-listing-panel .apv-summary-table td.apv-variant {
   text-align: left;
 }
 
-#apv-summary-panel .apv-variant {
+#apv-summary-panel .apv-variant,
+.apv-listing-panel .apv-variant {
   font-weight: 500;
   color: #1f1f23;
   word-break: break-word;
 }
 
-#apv-summary-panel .apv-anno {
+#apv-summary-panel .apv-anno,
+.apv-listing-panel .apv-anno {
   line-height: 1.3;
   letter-spacing: 0.1px;
 }
 
-#apv-summary-panel .apv-anno .apv-change {
+#apv-summary-panel .apv-anno .apv-change,
+.apv-listing-panel .apv-anno .apv-change {
   font-weight: 500;
   color: #696969;
 }
-#apv-summary-panel .apv-anno.apv-up   .apv-change { color: #198754; }
-#apv-summary-panel .apv-anno.apv-down .apv-change { color: #c2410c; }
-#apv-summary-panel .apv-anno.apv-flat .apv-change { color: #696969; }
+#apv-summary-panel .apv-anno.apv-up   .apv-change,
+.apv-listing-panel .apv-anno.apv-up   .apv-change { color: #198754; }
+#apv-summary-panel .apv-anno.apv-down .apv-change,
+.apv-listing-panel .apv-anno.apv-down .apv-change { color: #c2410c; }
+#apv-summary-panel .apv-anno.apv-flat .apv-change,
+.apv-listing-panel .apv-anno.apv-flat .apv-change { color: #696969; }
 
-#apv-summary-panel .apv-anno .apv-pvalue {
+#apv-summary-panel .apv-anno .apv-pvalue,
+.apv-listing-panel .apv-anno .apv-pvalue {
   color: #696969;
   font-weight: 400;
   font-size: 11px;
 }
-#apv-summary-panel .apv-anno.apv-sig .apv-pvalue {
+#apv-summary-panel .apv-anno.apv-sig .apv-pvalue,
+.apv-listing-panel .apv-anno.apv-sig .apv-pvalue {
   color: #198754;
   font-weight: 600;
 }
-#apv-summary-panel .apv-anno .apv-pvalue.apv-na {
+#apv-summary-panel .apv-anno .apv-pvalue.apv-na,
+.apv-listing-panel .apv-anno .apv-pvalue.apv-na {
   color: #bbbbc4;
+}
+
+/* Sort bar mounted at the top of the listing-page test card container.
+   Reorders Adapty's <article> cards by metric lift. */
+.apv-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  background: #fafafa;
+  font-family: inherit;
+  color: #1f1f23;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+
+.apv-sort-bar .apv-sort-label {
+  font-weight: 600;
+  color: #4b4b53;
+  letter-spacing: 0.2px;
+}
+
+.apv-sort-bar .apv-sort-select {
+  font: inherit;
+  color: #1f1f23;
+  background: #ffffff;
+  border: 1px solid #d9d9df;
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  min-width: 260px;
+}
+
+.apv-sort-bar .apv-sort-select:focus {
+  outline: 2px solid #b3b3ff;
+  outline-offset: 1px;
 }
